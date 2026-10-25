@@ -1,0 +1,24 @@
+* FEAT2CSV - TURN FIXED-WIDTH FEATURE RECORDS (FEATREC) INTO CSV
+*  INREC  : PUT A COMMA AFTER EVERY FIELD
+*  OUTFIL : SQUEEZE OUT THE BLANKS OF THE EDITED NUMBERS, ADD THE
+*           HEADER LINE, WRITE VARIABLE-LENGTH RECORDS (FTOV) AND
+*           TRIM TRAILING BLANKS (VLTRIM)
+* GENERATED FROM ml/layouts.py FEATURE_FIELDS - DO NOT EDIT BY HAND
+  OPTION COPY
+  INREC BUILD=(1,8,C',',9,8,C',',17,1,C',',18,3,C',',21,10,C',',31,3,
+               C',',34,2,C',',36,10,C',',46,7,C',',53,3,C',',56,3,
+               C',',59,2,C',',61,2,C',',63,2,C',',65,2,C',',67,2,
+               C',',69,2,C',',71,3,C',',74,6,C',',80,7,C',',87,10,
+               C',',97,10,C',',107,8,C',',115,7,C',',122,1,C',',
+               123,8,C',',131,8,C',',139,6,C',',145,1)
+  OUTFIL FNAMES=SORTOUT,FTOV,VLTRIM=C' ',REMOVECC,
+    HEADER1=(C'cust_id,as_of_date,emp_type,age,monthly_income,c',
+             C'redit_score,active_loans,total_emi,emi_to_income',
+             C',tenure_remaining,inst_due_12m,late_cnt_3m,late_',
+             C'cnt_12m,missed_cnt_12m,partial_cnt_12m,emi_bounc',
+             C'e_6m,txn_bounce_6m,max_dpd_12m,avg_dpd_6m,dpd_tr',
+             C'end,avg_balance_3m,min_balance_3m,balance_trend_',
+             C'pct,savings_to_emi,salary_missing_6m,debit_credi',
+             C't_ratio_3m,spend_trend_pct,cc_util_avg_3m,label_',
+             C'stress_90d'),
+    BUILD=(1,173,SQZ=(SHIFT=LEFT),300X)

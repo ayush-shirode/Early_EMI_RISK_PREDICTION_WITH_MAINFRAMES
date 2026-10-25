@@ -1,0 +1,12 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/page": "app/page.js",
+  "/customers/page": "app/customers/page.js",
+  "/customer/[id]/page": "app/customer/[id]/page.js",
+  "/comparison/page": "app/comparison/page.js",
+  "/emi-forecast/page": "app/emi-forecast/page.js",
+  "/prediction/page": "app/prediction/page.js",
+  "/mainframe/runs/page": "app/mainframe/runs/page.js",
+  "/mainframe/runs/[id]/page": "app/mainframe/runs/[id]/page.js",
+  "/mainframe/model/page": "app/mainframe/model/page.js"
+}

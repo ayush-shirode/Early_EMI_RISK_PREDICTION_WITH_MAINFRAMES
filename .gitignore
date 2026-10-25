@@ -1,0 +1,126 @@
+# =========================
+# Node.js
+# =========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Build files
+dist/
+build/
+out/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# Docker
+# =========================
+docker-data/
+docker-volumes/
+*.tar
+
+# Docker compose override files
+docker-compose.override.yml
+
+# =========================
+# Kafka / Zookeeper
+# =========================
+kafka-data/
+zookeeper-data/
+kraft-combined-logs/
+*.snapshot
+*.log.dir
+
+# Kafka local configs
+server.properties
+consumer.properties
+producer.properties
+
+# =========================
+# Elastic Stack
+# =========================
+elasticsearch/data/
+elasticsearch/logs/
+logstash/data/
+logstash/logs/
+kibana/data/
+
+# Elasticsearch indices
+esdata/
+eslogs/
+
+# =========================
+# Ollama
+# =========================
+ollama/
+ollama-data/
+models/
+*.gguf
+
+# Large AI model files
+*.bin
+*.pt
+*.pth
+*.safetensors
+
+# =========================
+# Temporary files
+# =========================
+tmp/
+temp/
+.cache/
+
+# =========================
+# Test output
+# =========================
+junit.xml
+test-results/
+
+# =========================
+# Misc
+# =========================
+*.local
+*.backup
+*.bak
+
+# =========================
+# Python / ML / pipeline
+# =========================
+__pycache__/
+*.pyc
+.venv/
+ml/artifacts/
+data/
+*.sqlite*
+*.db
+.pytest_cache/
+tsconfig.tsbuildinfo
