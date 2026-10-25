@@ -53,8 +53,8 @@ export default function RunsPage() {
 
       {error && <p className="text-sm text-rose-400">{error}</p>}
 
-      <div className="glass-panel overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="glass-panel overflow-x-auto">
+        <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="border-b border-[#1f293d] text-[10px] uppercase tracking-widest text-gray-500">
               <th className="px-5 py-3 text-left">Run</th>
@@ -79,7 +79,7 @@ export default function RunsPage() {
                 <td className="px-5 py-3 text-xs font-mono text-gray-400">{duration(r.started_at, r.finished_at)}</td>
                 <td className="px-5 py-3">
                   <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${STATUS[r.status]}`}>{r.status}</span>
-                  {r.error && <p className="text-xs text-rose-300/80 mt-1 max-w-md truncate" title={r.error}>{r.error}</p>}
+                  {r.error && <p className="text-xs text-rose-300/80 mt-1 max-w-md truncate whitespace-normal" title={r.error}>{r.error}</p>}
                 </td>
               </tr>
             ))}

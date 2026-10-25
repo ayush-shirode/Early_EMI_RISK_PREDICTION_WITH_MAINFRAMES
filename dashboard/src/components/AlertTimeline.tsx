@@ -4,13 +4,12 @@ import { Prediction } from '@/lib/types';
 
 interface Props {
   history: Prediction[];
+  title?: string;
 }
 
-export function AlertTimeline({ history = [] }: Props) {
+export function AlertTimeline({ history = [], title = 'Prediction history (one per batch run)' }: Props) {
   const getSeverityStyles = (severity: string) => {
     switch (severity) {
-      case 'critical':
-        return { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/30' };
       case 'high':
         return { bg: 'bg-orange-500/10', text: 'text-orange-400', border: 'border-orange-500/30' };
       case 'medium':
@@ -36,14 +35,14 @@ export function AlertTimeline({ history = [] }: Props) {
   };
 
   return (
-    <div className="glass-panel p-6 flex flex-col h-full overflow-hidden">
+    <div className="glass-panel p-6 flex flex-col overflow-hidden">
       <div className="flex items-center justify-between mb-4 border-b border-[#1f293d] pb-3">
         <h3 className="text-sm font-bold tracking-wider text-gray-400 uppercase flex items-center gap-2">
           <ShieldAlert size={16} className="text-blue-400" />
-          <span>Prediction history (one per batch run)</span>
+          <span>{title}</span>
         </h3>
         <span className="text-[10px] bg-[#1a2133] border border-[#2b3a57] text-gray-400 px-2 py-0.5 rounded font-mono uppercase">
-          Latest {history.length} runs
+          {history.length} {history.length === 1 ? 'run' : 'runs'}
         </span>
       </div>
 

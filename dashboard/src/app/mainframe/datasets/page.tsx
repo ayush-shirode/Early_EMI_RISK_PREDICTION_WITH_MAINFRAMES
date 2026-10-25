@@ -40,8 +40,8 @@ export default function DatasetsPage() {
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
-      <div className="xl:col-span-3 glass-panel overflow-hidden">
-        <table className="w-full text-xs">
+      <div className="xl:col-span-3 glass-panel overflow-x-auto">
+        <table className="w-full text-xs whitespace-nowrap">
           <thead>
             <tr className="border-b border-[#1f293d] text-[10px] uppercase tracking-widest text-gray-500">
               <th className="px-4 py-3 text-left">Data set</th><th className="px-2 py-3">Org</th><th className="px-2 py-3">RECFM</th>

@@ -11,7 +11,8 @@ This folder documents what was built in `CP/`, how its parts connect, and how to
 | [ML_MODEL.md](ML_MODEL.md) | Features, labels, training, evaluation, SHAP explanations and scoring |
 | [BACKEND_AND_DATABASE.md](BACKEND_AND_DATABASE.md) | The FastAPI backend, the action runner, the local SQLite database and the full API reference |
 | [FRONTEND.md](FRONTEND.md) | The Next.js dashboard: pages, what each shows, which API it calls |
-| [OPERATIONS.md](OPERATIONS.md) | Install, run, test, demo script, troubleshooting, security |
+| [DEMO.md](DEMO.md) | **Step-by-step demo**: preparation, a timed click-by-click script with talking points, expected results, fallback plan, likely questions |
+| [OPERATIONS.md](OPERATIONS.md) | Install, run, test, troubleshooting, security |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | The original plan, with notes on where the implementation differs |
 
 ## In one paragraph

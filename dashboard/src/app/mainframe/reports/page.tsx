@@ -60,7 +60,7 @@ function Reports() {
             </div>
           </div>
           <div className="lg:col-span-2 glass-panel overflow-auto max-h-[70vh]">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs whitespace-nowrap">
               <thead><tr className="border-b border-[#1f293d] text-[10px] uppercase tracking-widest text-gray-500">
                 <th className="px-3 py-2 text-left">Source</th><th className="px-3 py-2 text-left">Key</th>
                 <th className="px-3 py-2 text-left">Code</th><th className="px-3 py-2 text-left">Record (first 58 bytes)</th>

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Header } from '@/components/Header';
+import { PageShell, Loading } from '@/components/PageShell';
 import { RiskGauge } from '@/components/RiskGauge';
 import { SpendTrendChart } from '@/components/SpendTrendChart';
 import { PredictionCTA } from '@/components/PredictionCTA';
@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { useRiskPolling } from '@/hooks/useRiskPolling';
 import { useCustomer } from '@/context/CustomerContext';
 import { SEVERITY_BADGE } from '@/lib/customers';
-import { fmtAsOf, inr } from '@/lib/api';
+import { fmtAsOf, inr, ordinal } from '@/lib/api';
 import { AlertTriangle, Calendar, RefreshCw, Sliders, Play, Wallet, Server, X } from 'lucide-react';
 
 const MAX_EMI = 500_000;
@@ -29,12 +29,10 @@ export default function Dashboard() {
 
   if (listLoading && !c) {
     return (
-      <div className="min-h-screen bg-darkBg flex flex-col"><Header />
-        <div className="flex-1 flex items-center justify-center text-xs text-gray-400 font-mono uppercase tracking-wider animate-pulse">Loading scored customers…</div>
-      </div>
+      <PageShell><Loading text="Loading scored customers…" /></PageShell>
     );
   }
-  if (!c) return <div className="min-h-screen bg-darkBg flex flex-col"><Header /><EmptyState error={listError} /></div>;
+  if (!c) return <PageShell><EmptyState error={listError} /></PageShell>;
 
   const parsedEmi = parseFloat(customEmi);
   const emiInvalid = !isNaN(parsedEmi) && parsedEmi > MAX_EMI;
@@ -49,18 +47,16 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-darkBg text-gray-100 flex flex-col font-sans">
-      <Header />
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
+    <PageShell>
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#101625]/60 border border-[#1f293d] rounded-2xl p-5 backdrop-blur-sm">
+        <div className="glass-panel flex flex-col md:flex-row md:items-center justify-between gap-4 p-5">
           <div>
             <h2 className="text-xl font-bold tracking-tight text-white">{c.name} <span className="text-gray-500 font-mono text-base">{c.id}</span></h2>
             <p className="text-sm text-gray-400">
               {c.city} · {c.accountType.replace('-', ' ')} · {c.activeLoans} active loan{c.activeLoans === 1 ? '' : 's'} (largest: {c.loanType})
             </p>
           </div>
-          <div className="flex items-center gap-3 text-xs text-gray-400">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-400">
             <span className="flex items-center gap-1.5 bg-[#131926] border border-[#1f293d] px-3 py-2 rounded-xl font-mono">
               <Server size={13} className="text-cyan-400" /> batch run #{c.runId} · as-of {fmtAsOf(c.asOf)}
             </span>
@@ -142,7 +138,8 @@ export default function Dashboard() {
                 <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400"><Calendar size={20} /></div>
                 <div>
                   <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">Monthly EMI</span>
-                  <span className="text-xs font-bold font-mono text-white mt-0.5 block">{inr(c.emiAmount)} · due on the {c.emiDueDate}</span>
+                  <span className="text-base font-bold font-mono text-white block">{inr(c.emiAmount)}</span>
+                  <span className="text-[11px] text-gray-500">due on the {ordinal(c.emiDueDate)}</span>
                 </div>
               </div>
             </div>
@@ -152,7 +149,6 @@ export default function Dashboard() {
             <AlertTimeline history={alerts} />
           </div>
         </div>
-      </main>
-    </div>
+      </PageShell>
   );
 }

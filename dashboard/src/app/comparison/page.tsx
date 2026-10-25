@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Header } from '@/components/Header';
+import { PageShell, Loading } from '@/components/PageShell';
 import { EmptyState } from '@/components/EmptyState';
 import { useCustomer } from '@/context/CustomerContext';
 import { getSeverityColor, SEVERITY_BADGE } from '@/lib/customers';
+import { inr } from '@/lib/api';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
@@ -30,7 +31,7 @@ export default function ComparisonPage() {
     setIds([...start, ...extra, ...end].slice(0, 6));
   }, [allCustomers, selectedCustomer, ids.length]);
 
-  if (!allCustomers.length) return <div className="min-h-screen bg-darkBg flex flex-col"><Header /><EmptyState /></div>;
+  if (!allCustomers.length) return <PageShell><EmptyState /></PageShell>;
 
   const CUSTOMERS = ids.map(id => allCustomers.find(c => c.id === id)!).filter(Boolean);
   const CUSTOMER_COLORS: Record<string, string> = Object.fromEntries(CUSTOMERS.map((c, i) => [c.id, PALETTE[i % PALETTE.length]]));
@@ -78,14 +79,7 @@ export default function ComparisonPage() {
   const riskRanked = [...CUSTOMERS].sort((a, b) => b.riskScore - a.riskScore);
 
   return (
-    <div className="min-h-screen bg-darkBg text-gray-100 flex flex-col">
-      <Header />
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
-
-        <div>
-          <h2 className="text-2xl font-bold text-white">Portfolio Comparison</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Side-by-side spend trends and risk for up to 6 borrowers</p>
-        </div>
+    <PageShell title="Portfolio comparison" subtitle="Side-by-side spend trends and risk for up to 6 borrowers">
 
         <div className="flex flex-wrap items-center gap-2">
           {CUSTOMERS.map(c => (
@@ -116,7 +110,7 @@ export default function ComparisonPage() {
                 <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={v => `₹${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#131926', borderColor: '#1f293d', borderRadius: '12px', color: '#f3f4f6' }}
-                  formatter={(v: number, name: string) => [`₹${v.toLocaleString('en-IN')}`, name]}
+                  formatter={(v: number, name: string) => [inr(v), name]}
                 />
                 <Legend
                   wrapperStyle={{ paddingTop: '16px', fontSize: '12px', color: '#94a3b8' }}
@@ -143,7 +137,7 @@ export default function ComparisonPage() {
             <h3 className="text-sm font-bold tracking-wider text-gray-400 uppercase">Spend & EMI Analysis</h3>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm whitespace-nowrap">
               <thead>
                 <tr className="border-b border-[#1f293d] text-[10px] uppercase tracking-widest text-gray-500">
                   <th className="px-5 py-3 text-left cursor-pointer hover:text-gray-300" onClick={() => handleSort('name')}>
@@ -178,14 +172,14 @@ export default function ComparisonPage() {
                           <span className="font-semibold text-gray-100">{c.name} <span className="text-xs text-gray-500 font-mono">{c.id}</span></span>
                         </div>
                       </td>
-                      <td className="px-5 py-4 text-right font-mono text-gray-300">₹{c.avgSpend.toLocaleString('en-IN')}</td>
-                      <td className="px-5 py-4 text-right font-mono text-gray-200 font-semibold">₹{c.currentSpend.toLocaleString('en-IN')}</td>
+                      <td className="px-5 py-4 text-right font-mono text-gray-300">{inr(c.avgSpend)}</td>
+                      <td className="px-5 py-4 text-right font-mono text-gray-200 font-semibold">{inr(c.currentSpend)}</td>
                       <td className="px-5 py-4 text-center">
                         <span className={`font-semibold ${vsPrevColor}`}>
                           {vsPrevArrow} {Math.abs(c.vsPrev).toFixed(1)}%
                         </span>
                       </td>
-                      <td className="px-5 py-4 text-right font-mono text-gray-300">₹{c.emiAmount.toLocaleString('en-IN')}</td>
+                      <td className="px-5 py-4 text-right font-mono text-gray-300">{inr(c.emiAmount)}</td>
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2">
                           <div className="w-20 h-2 bg-[#1f293d] rounded-full overflow-hidden">
@@ -204,7 +198,7 @@ export default function ComparisonPage() {
                       </td>
                       <td className="px-5 py-4 text-center">
                         <span className="font-mono font-bold" style={{ color: getSeverityColor(c.severity) }}>
-                          {c.riskScore}
+                          {c.riskScore}%
                         </span>
                       </td>
                     </tr>
@@ -236,7 +230,7 @@ export default function ComparisonPage() {
                   <div className="w-32 h-2 bg-[#1f293d] rounded-full overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${c.riskScore}%`, backgroundColor: color }} />
                   </div>
-                  <span className="font-mono font-bold text-sm w-8 text-right" style={{ color }}>{c.riskScore}</span>
+                  <span className="font-mono font-bold text-sm w-12 text-right" style={{ color }}>{c.riskScore}%</span>
                   <span className={`text-[10px] font-black tracking-widest px-2 py-0.5 rounded border uppercase ${badgeStyles[c.severity]}`}>
                     {c.severity}
                   </span>
@@ -246,7 +240,6 @@ export default function ComparisonPage() {
           </div>
         </div>
 
-      </main>
-    </div>
+      </PageShell>
   );
 }

@@ -2,17 +2,14 @@
 
 import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import {
-  ArrowLeft, Printer, Brain, BarChart3,
-  ShieldAlert, Zap,
-} from 'lucide-react';
+import { Printer, BarChart3, Zap } from 'lucide-react';
 
 import { useCustomer } from '@/context/CustomerContext';
 import { toShapResult, ShapResult } from '@/lib/shap';
 import { api, fmtAsOf, inr } from '@/lib/api';
 import type { Explanation, ModelMetrics, Prediction } from '@/lib/types';
 import { EmptyState } from '@/components/EmptyState';
+import { PageShell, Loading } from '@/components/PageShell';
 import { AlertTimeline } from '@/components/AlertTimeline';
 import { ShapWaterfallChart } from '@/components/ShapWaterfallChart';
 import { FeatureDetailTable } from '@/components/FeatureDetailTable';
@@ -71,10 +68,8 @@ function PredictionContent() {
     })))).catch(() => setHistory([]));
   }, [customer]);
 
-  if (!customer) return <EmptyState />;
-  if (!shap || !explanation) {
-    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b949e' }}>Loading SHAP explanation…</div>;
-  }
+  if (!customer) return <PageShell><EmptyState /></PageShell>;
+  if (!shap || !explanation) return <PageShell><Loading text="Loading SHAP explanation…" /></PageShell>;
 
   // savings coverage
   const savingsCoverage = Math.min(100, Math.round((customer.assessedSavings / customer.emiAmount) * 100));
@@ -100,43 +95,22 @@ function PredictionContent() {
   });
 
   return (
+    <PageShell
+      title={<>Risk explanation <span className="text-gray-500 font-semibold text-lg">{customer.name} · {customer.id}</span></>}
+      subtitle={`Scored ${predMeta} · batch run #${customer.runId} · as-of ${fmtAsOf(customer.asOf)} · model ${shap.modelVersion}`}
+      actions={<>
+        <select value={customer.id} onChange={e => handleCustomerChange(e.target.value)}
+          className="no-print bg-[#131926] border border-[#1f293d] rounded-lg px-3 py-2 text-sm font-semibold text-gray-200 focus:outline-none focus:border-cyan-500 max-w-[260px]">
+          {allCustomers.map(c => (
+            <option key={c.id} value={c.id}>{c.id} · {c.name} · {c.riskScore}%</option>
+          ))}
+        </select>
+        <button onClick={() => window.print()}
+          className="no-print flex items-center gap-2 bg-[#131926] border border-[#1f293d] hover:border-cyan-500/30 text-gray-200 px-4 py-2 rounded-xl text-sm font-semibold">
+          <Printer size={14} /> Download PDF
+        </button>
+      </>}>
     <div id="printable" className={styles.page}>
-
-      {/* ===== PAGE HEADER ===== */}
-      <div className={`${styles.pageHeader} no-print`}>
-        <div className={styles.headerRow}>
-          <Link href="/" className={styles.backLink}>
-            <ArrowLeft size={14} /> Back to Dashboard
-          </Link>
-
-          <div>
-            <h1 className={styles.headerTitle}>
-              Risk explanation — {customer.name} ({customer.id})
-            </h1>
-            <p className={styles.headerMeta}>
-              Scored on {predMeta} · batch run #{customer.runId} · as-of {fmtAsOf(customer.asOf)} · model {shap.modelVersion}
-            </p>
-          </div>
-
-          <div className={styles.headerActions}>
-            <select
-              value={customer.id}
-              onChange={e => handleCustomerChange(e.target.value)}
-              className={styles.headerCustomerSelect}
-            >
-              {allCustomers.map(c => (
-                <option key={c.id} value={c.id}>{c.id} · {c.name} · {c.riskScore}%</option>
-              ))}
-            </select>
-
-            <button className={styles.printBtn} onClick={() => window.print()}>
-              <Printer size={13} /> Download PDF
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ===== MAIN CONTENT ===== */}
       <main className={styles.main}>
 
         {/* ===== ZONE 2: STAT CARDS ===== */}
@@ -254,35 +228,18 @@ function PredictionContent() {
         </div>
 
         {/* ===== ZONE 4: ALERT TIMELINE ===== */}
-        <div className={styles.timelineSection}>
-          <h2 className={styles.sectionTitle} style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldAlert size={15} style={{ color: '#60a5fa' }} />
-            Prediction history — {customer.name}
-          </h2>
-          <AlertTimeline history={history} />
-        </div>
+        <AlertTimeline history={history} title={`Prediction history — ${customer.name}`} />
 
       </main>
     </div>
+    </PageShell>
   );
 }
 
 /* ---------- page export with Suspense (needed for useSearchParams in App Router) ---------- */
 export default function PredictionPage() {
   return (
-    <Suspense fallback={
-      <div style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', background: '#0d1117', color: '#8b949e',
-        fontSize: '14px', gap: '10px',
-      }}>
-        <div style={{
-          width: '20px', height: '20px', border: '3px solid #1d9e7544',
-          borderTopColor: '#1d9e75', borderRadius: '50%', animation: 'spin 0.8s linear infinite',
-        }} />
-        Loading analysis…
-      </div>
-    }>
+    <Suspense fallback={<PageShell><Loading text="Loading analysis…" /></PageShell>}>
       <PredictionContent />
     </Suspense>
   );

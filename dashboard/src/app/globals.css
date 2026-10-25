@@ -57,7 +57,7 @@
 
 /* Print stylesheet — for /prediction page Download PDF */
 @media print {
-  nav, .no-print { display: none !important; }
+  header, nav, .no-print { display: none !important; }
   body { background: #ffffff !important; color: #000000 !important; }
   h1, h2, h3, p, td, th, span { color: #111111 !important; }
 }

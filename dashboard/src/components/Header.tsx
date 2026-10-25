@@ -47,49 +47,47 @@ export function Header() {
   const { selectedCustomer, setSelectedCustomer, allCustomers } = useCustomer();
 
   return (
-    <header className="border-b border-[#1f293d] bg-[#0c101b]/80 backdrop-blur-md sticky top-0 z-50 px-6 py-3 flex flex-wrap gap-3 items-center justify-between">
-      <div className="flex flex-wrap items-center">
-        <div className="flex items-center gap-3">
-          <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]">
+    <header className="border-b border-[#1f293d] bg-[#0c101b]/85 backdrop-blur-md sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-3 flex flex-wrap items-center justify-between gap-3">
+        <Link href="/" className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-cyan-400 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]">
             <Cpu size={22} />
           </div>
           <div>
-            <h1 className="text-xl font-extrabold tracking-tight text-white flex items-center gap-2">
+            <h1 className="text-xl font-extrabold tracking-tight text-white leading-none">
               VIGILANCE <span className="bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">AI</span>
             </h1>
-            <p className="text-xs text-gray-400 tracking-wider font-semibold uppercase">Early Warning Credit Risk · z/OS + ML</p>
+            <p className="text-[11px] text-gray-400 tracking-wider font-semibold uppercase mt-1">Early Warning Credit Risk · z/OS + ML</p>
           </div>
-        </div>
-        <Nav />
-      </div>
+        </Link>
 
-      <div className="flex items-center gap-4">
-        {selectedCustomer && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 uppercase font-semibold">Active Profile:</span>
-            <div className="relative">
-              <select
-                value={selectedCustomer.id}
-                onChange={(e) => {
-                  const found = allCustomers.find(c => c.id === e.target.value);
-                  if (found) setSelectedCustomer(found);
-                }}
-                className="bg-[#131926] border border-[#1f293d] rounded-lg pl-8 pr-3 py-1.5 text-sm font-semibold text-gray-200 focus:outline-none focus:border-cyan-500 transition-all cursor-pointer appearance-none max-w-[260px]"
-              >
-                {allCustomers.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.id} · {c.name} · {c.riskScore}%
-                  </option>
-                ))}
-              </select>
-              <span
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none"
-                style={{ backgroundColor: getSeverityColor(selectedCustomer.severity) }}
-              />
-            </div>
-          </div>
-        )}
-        <MainframeIndicator />
+        <div className="flex flex-wrap items-center gap-3">
+          {selectedCustomer && (
+            <label className="flex items-center gap-2">
+              <span className="hidden md:inline text-xs text-gray-400 uppercase font-semibold">Profile</span>
+              <span className="relative">
+                <select
+                  value={selectedCustomer.id}
+                  onChange={(e) => {
+                    const found = allCustomers.find(c => c.id === e.target.value);
+                    if (found) setSelectedCustomer(found);
+                  }}
+                  className="bg-[#131926] border border-[#1f293d] rounded-lg pl-8 pr-3 py-1.5 text-sm font-semibold text-gray-200 focus:outline-none focus:border-cyan-500 cursor-pointer appearance-none w-[240px] truncate"
+                >
+                  {allCustomers.map(c => (
+                    <option key={c.id} value={c.id}>{c.id} · {c.name} · {c.riskScore}%</option>
+                  ))}
+                </select>
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full pointer-events-none"
+                  style={{ backgroundColor: getSeverityColor(selectedCustomer.severity) }} />
+              </span>
+            </label>
+          )}
+          <MainframeIndicator />
+        </div>
+      </div>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2">
+        <Nav />
       </div>
     </header>
   );

@@ -75,3 +75,10 @@ export const ASOF_OPTIONS: number[] = (() => {
   }
   return out;
 })();
+
+/** 1 → "1st", 2 → "2nd", 22 → "22nd", 13 → "13th". */
+export function ordinal(n: number | string) {
+  const v = Number(n);
+  const s = v % 100 >= 11 && v % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[v % 10] ?? 'th';
+  return `${v}${s}`;
+}

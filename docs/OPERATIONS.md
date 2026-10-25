@@ -29,17 +29,9 @@ make dev        # backend 127.0.0.1:8000 + dashboard http://localhost:3000  (Ctr
 
 Then use Dashboard, Customers, AI Analysis, and Mainframe → Reports.
 
-## 4. Demo script (about 10 minutes)
+## 4. Demo
 
-1. **Mainframe → Overview**: connected to z/OS, checklist complete, explain the 5 steps.
-2. **Data sets**: open `Z72230.EWS.CUSTMAST` (fixed-width records as stored on z/OS), then `Z72230.EWS.JCL` → `EWSBATCH`.
-3. **Batch runs → Run batch & score**: follow the timeline; point at the JCL step chips (DFSORT → COBOL validate → COBOL match → DFSORT CSV → REXX), RC 4 on the validation steps because bad records were rejected.
-4. Click **Job output** → `STEP070 SYSOUT` (EWSMATCH counts), `STEP090 SYSTSPRT` (REXX reconciliation), `JESYSMSG` (the return codes).
-5. **Reports → Rejected records** (reason codes) and **Reconciliation** (all checks OK).
-6. **Customers** → filter High → open one → **SHAP analysis**: why this customer is high risk.
-7. **Dashboard → What-if**: lower the EMI, re-score, risk drops.
-8. **Reports → Intervention report**: the list printed by COBOL on the mainframe from the scores written back.
-9. **Model**: AUC, tiers vs actual outcomes, confusion matrix, feature importance.
+See [DEMO.md](DEMO.md) for the full click-by-click demo script, expected results and likely questions.
 
 ## 5. Tests
 

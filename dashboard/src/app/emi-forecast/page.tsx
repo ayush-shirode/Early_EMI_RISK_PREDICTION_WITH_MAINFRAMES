@@ -1,11 +1,11 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { Header } from '@/components/Header';
+import { PageShell, Loading } from '@/components/PageShell';
 import { EmptyState } from '@/components/EmptyState';
 import { useCustomer } from '@/context/CustomerContext';
 import { getSeverityColor, SEVERITY_BADGE } from '@/lib/customers';
-import { inr } from '@/lib/api';
+import { inr, ordinal } from '@/lib/api';
 import { ExternalLink } from 'lucide-react';
 
 function MissBar({ probability, severity }: { probability: number; severity: string }) {
@@ -45,7 +45,7 @@ export default function EmiForecastPage() {
   const today = new Date();
   const { allCustomers: CUSTOMERS } = useCustomer();
   const [limit, setLimit] = useState(20);
-  if (!CUSTOMERS.length) return <div className="min-h-screen bg-darkBg flex flex-col"><Header /><EmptyState /></div>;
+  if (!CUSTOMERS.length) return <PageShell><EmptyState /></PageShell>;
   // Customers arrive sorted by stress probability; the forecast focuses on those the model flags.
   const flagged = CUSTOMERS.filter(c => c.severity !== 'low');
   const sortedCustomers = flagged.slice(0, limit);
@@ -63,17 +63,10 @@ export default function EmiForecastPage() {
   const badgeStyles = SEVERITY_BADGE;
 
   return (
-    <div className="min-h-screen bg-darkBg text-gray-100 flex flex-col">
-      <Header />
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
-
-        <div>
-          <h2 className="text-2xl font-bold text-white">EMI Miss Forecast</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Borrowers the model flags (Medium/High) ahead of their next EMI dates</p>
-        </div>
+    <PageShell title="EMI stress forecast" subtitle="Borrowers the model flags (Medium/High) ahead of their next EMI dates">
 
         {/* Summary Banner */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="glass-panel p-5 border-l-4 border-emerald-500">
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Low risk</p>
             <p className="text-4xl font-black font-mono text-emerald-400">{safe}</p>
@@ -92,7 +85,7 @@ export default function EmiForecastPage() {
         </div>
 
         {/* Forecast Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {sortedCustomers.map(c => {
             const color = getSeverityColor(c.severity);
             const daysUntil = getDaysUntil(c.emiDueDate);
@@ -123,14 +116,14 @@ export default function EmiForecastPage() {
                 </div>
 
                 {/* EMI + Due */}
-                <div className="flex items-center gap-6 text-sm">
+                <div className="grid grid-cols-3 gap-3 text-sm whitespace-nowrap">
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase tracking-wider">EMI Amount</p>
                     <p className="font-mono font-bold text-gray-100">{inr(c.emiAmount)}</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase tracking-wider">Due Date</p>
-                    <p className="font-mono font-bold text-gray-100">{c.emiDueDate}th of month</p>
+                    <p className="font-mono font-bold text-gray-100">{ordinal(c.emiDueDate)} of month</p>
                   </div>
                   <div>
                     <p className="text-[10px] text-gray-500 uppercase tracking-wider">Days Until Due</p>
@@ -179,7 +172,8 @@ export default function EmiForecastPage() {
           <div className="px-6 py-4 border-b border-[#1f293d]">
             <h3 className="text-sm font-bold tracking-wider text-gray-400 uppercase">Next EMI dates — flagged customers ({flagged.length})</h3>
           </div>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="border-b border-[#1f293d] text-[10px] uppercase tracking-widest text-gray-500">
                 <th className="px-5 py-3 text-left">Customer</th>
@@ -208,7 +202,7 @@ export default function EmiForecastPage() {
                       </td>
                       <td className="px-5 py-3.5 text-right font-mono text-gray-300">{inr(c.emiAmount)}</td>
                       <td className="px-5 py-3.5 text-center text-gray-400 font-mono text-xs">
-                        {c.emiDueDate}th
+                        {ordinal(c.emiDueDate)}
                       </td>
                       <td className="px-5 py-3.5 text-center">
                         <span className={`font-mono font-bold ${days <= 3 ? 'text-rose-400' : days <= 7 ? 'text-amber-400' : 'text-gray-300'}`}>
@@ -233,9 +227,9 @@ export default function EmiForecastPage() {
                 })}
             </tbody>
           </table>
+          </div>
         </div>
 
-      </main>
-    </div>
+      </PageShell>
   );
 }

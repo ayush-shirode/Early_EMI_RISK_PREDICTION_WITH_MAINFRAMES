@@ -12,6 +12,15 @@ Code: `dashboard/`. Next.js 14.2 (App Router), React 18, Tailwind CSS, Recharts,
 * `src/hooks/useRun.ts`: polls `GET /runs/{id}` every 2 s until the run finishes.
 * `src/hooks/useRiskPolling.ts`: a customer's prediction history and the what-if call.
 
+### Layout and consistency
+
+* Every page is wrapped in `components/PageShell.tsx`: the global header, a centred `max-w-7xl` content column with the same padding, and a standard title / subtitle / actions row. `Loading` gives the same loading line everywhere.
+* The header has two rows: brand on the left with the customer profile selector and the mainframe status on the right, then the navigation, which scrolls sideways on narrow screens instead of wrapping.
+* Panels use the shared `glass-panel` style (also on the SHAP page, whose CSS module now uses the same colours as the rest of the app). Panels size to their content; none use `h-full`, which made the prediction-history and suggestion panels overflow their column.
+* Wide tables sit in `overflow-x-auto` containers with `whitespace-nowrap`, so they scroll instead of squeezing on tablets.
+* Money is formatted with `inr()` (₹, Indian grouping, no decimals), risk as a percentage, due days with `ordinal()` (1st, 2nd, 3rd…).
+* Colours: High orange, Medium yellow, Low green; in SHAP views red raises risk and green lowers it.
+
 ## 2. Pages
 
 ### Mainframe Control Center (new)

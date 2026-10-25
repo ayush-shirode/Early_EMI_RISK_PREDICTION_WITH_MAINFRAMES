@@ -29,16 +29,16 @@ export function SuggestionCards({ suggestions = [], severity = 'low' }: Props) {
   };
 
   return (
-    <div className="glass-panel p-6 overflow-hidden flex flex-col h-full justify-between">
+    <div className="glass-panel p-6 overflow-hidden flex flex-col justify-between">
       <div>
         <h3 className="text-sm font-bold tracking-wider text-gray-400 uppercase mb-4 flex items-center gap-2">
-          <span>🧠 AI Decision Recommendations</span>
+          <Lightbulb size={16} className="text-cyan-400" />
+          <span>Suggested actions</span>
         </h3>
         
         {suggestions.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
-            <span className="text-3xl mb-2">✨</span>
-            <p className="text-sm text-gray-400">No active AI suggestions. Trigger a prediction run to populate.</p>
+            <p className="text-sm text-gray-400">No suggestions for this customer.</p>
           </div>
         ) : (
           <div className="space-y-3.5">
@@ -58,8 +58,7 @@ export function SuggestionCards({ suggestions = [], severity = 'low' }: Props) {
       </div>
 
       <div className="mt-4 pt-3 border-t border-[#1f293d] text-[10px] text-gray-500 flex items-center justify-between">
-        <span>Engine model: TinyLlama v1.1</span>
-        <span>Validated via Zod contract</span>
+        <span>Tier action plus advice for the top SHAP risk drivers</span>
       </div>
     </div>
   );

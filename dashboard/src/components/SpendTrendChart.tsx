@@ -18,19 +18,19 @@ interface Props {
 export function SpendTrendChart({ data, emiAmount = 0 }: Props) {
   return (
     <div className="glass-panel p-6 overflow-hidden">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 mb-6">
         <div>
-          <h3 className="text-sm font-bold tracking-wider text-gray-400 uppercase">Monthly Cash Outflow Trends</h3>
-          <p className="text-xs text-gray-500">Compares monthly transactional outflows with upcoming EMI stress thresholds</p>
+          <h3 className="text-sm font-bold tracking-wider text-gray-400 uppercase">Monthly cash outflow</h3>
+          <p className="text-xs text-gray-500">Monthly debits from EWS.TXNSUMM compared with the monthly EMI</p>
         </div>
-        <div className="flex items-center gap-4 text-xs font-semibold">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded bg-indigo-500"></span>
-            <span className="text-gray-300">Spend Outflow</span>
+            <span className="text-gray-300 whitespace-nowrap">Spend outflow</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-1 border-t-2 border-dashed border-red-500"></span>
-            <span className="text-gray-300">EMI Threshold (₹{emiAmount.toLocaleString('en-IN')})</span>
+            <span className="text-gray-300 whitespace-nowrap">EMI ₹{Math.round(emiAmount).toLocaleString('en-IN')}</span>
           </div>
         </div>
       </div>

@@ -2,13 +2,13 @@
 
 /* ---------- CSS custom properties ---------- */
 .page {
-  --bg-primary:    #0d1117;
-  --bg-card:       #161b22;
-  --bg-input:      #1c2128;
-  --border:        #30363d;
-  --border-subtle: #21262d;
+  --bg-primary:    #090d16;
+  --bg-card:       rgba(19, 25, 38, 0.8);
+  --bg-input:      #0c101b;
+  --border:        #1f293d;
+  --border-subtle: #1a2236;
   --text-primary:  #e6edf3;
-  --text-muted:    #8b949e;
+  --text-muted:    #94a3b8;
   --text-dim:      #c9d1d9;
   --accent-teal:   #1d9e75;
   --accent-teal-bg:#1d6e5e;
@@ -27,10 +27,9 @@
   --shap-neg-bar:  #1d6e5e;
   --shap-pos-text: #f87171;
   --shap-neg-text: #34d399;
-  --shap-track:    #1c2128;
+  --shap-track:    #1b2438;
 
-  min-height: 100vh;
-  background: var(--bg-primary);
+  background: transparent;
   color: var(--text-primary);
   font-family: 'Outfit', sans-serif;
 }
@@ -120,9 +119,7 @@
 
 /* ---------- Main content ---------- */
 .main {
-  padding: 24px 32px 48px;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -145,7 +142,7 @@
 .statCard {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
@@ -528,7 +525,7 @@
   background: #161b22;
   border: 1px solid #30363d;
   border-left: 3px solid #1d9e75;
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 16px 20px;
   transition: box-shadow 0.2s, border-color 0.2s;
 }

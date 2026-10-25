@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Header } from '@/components/Header';
+import { PageShell, Loading } from '@/components/PageShell';
 import { RiskGauge } from '@/components/RiskGauge';
 import { SpendTrendChart } from '@/components/SpendTrendChart';
 import { SuggestionCards } from '@/components/SuggestionCards';
@@ -56,8 +56,8 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
     if (listed) setSelectedCustomer(listed);
   }, [params.id, allCustomers, setSelectedCustomer]);
 
-  if (error) return <div className="min-h-screen bg-darkBg flex flex-col"><Header /><p className="p-10 text-center text-rose-400">{error}</p></div>;
-  if (!c) return <div className="min-h-screen bg-darkBg flex flex-col"><Header /><p className="p-10 text-center text-gray-400">Loading…</p></div>;
+  if (error) return <PageShell><p className="p-10 text-center text-rose-400">{error}</p></PageShell>;
+  if (!c) return <PageShell><Loading /></PageShell>;
 
   const color = getSeverityColor(c.severity);
   const coverage = Math.min(100, (c.assessedSavings / c.emiAmount) * 100);
@@ -87,9 +87,7 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   };
 
   return (
-    <div className="min-h-screen bg-darkBg text-gray-100 flex flex-col">
-      <Header />
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
+    <PageShell>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-black"
@@ -187,7 +185,6 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
             </ResponsiveContainer>
           </div>
         </div>
-      </main>
-    </div>
+      </PageShell>
   );
 }

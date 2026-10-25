@@ -1,7 +1,7 @@
 'use client';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Header } from '@/components/Header';
+import { PageShell, Loading } from '@/components/PageShell';
 import { EmptyState } from '@/components/EmptyState';
 import { useCustomer } from '@/context/CustomerContext';
 import { getSeverityColor, SEVERITY_BADGE } from '@/lib/customers';
@@ -43,7 +43,7 @@ export default function CustomersPage() {
       });
   }, [allCustomers, tier, q, sortKey, sortDir]);
 
-  if (!loading && allCustomers.length === 0) return <div className="min-h-screen bg-darkBg flex flex-col"><Header /><EmptyState error={error} /></div>;
+  if (!loading && allCustomers.length === 0) return <PageShell><EmptyState error={error} /></PageShell>;
 
   const rows = filtered.slice(page * PAGE, page * PAGE + PAGE);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
@@ -58,15 +58,8 @@ export default function CustomersPage() {
   const SortIcon = ({ k }: { k: SortKey }) => sortKey === k ? (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null;
 
   return (
-    <div className="min-h-screen bg-darkBg text-gray-100 flex flex-col">
-      <Header />
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Customer Registry</h2>
-          <p className="text-sm text-gray-400 mt-0.5">
-            Every borrower scored by the latest mainframe batch{allCustomers[0] ? ` (run #${allCustomers[0].runId}, as-of ${fmtAsOf(allCustomers[0].asOf)})` : ''}
-          </p>
-        </div>
+    <PageShell title="Customer registry"
+      subtitle={`Every borrower scored by the latest mainframe batch${allCustomers[0] ? ` (run #${allCustomers[0].runId}, as-of ${fmtAsOf(allCustomers[0].asOf)})` : ''}`}>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -99,7 +92,7 @@ export default function CustomersPage() {
 
         <div className="glass-panel overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm whitespace-nowrap">
               <thead>
                 <tr className="border-b border-[#1f293d] text-[10px] uppercase tracking-widest text-gray-500">
                   <th className="px-5 py-3.5 text-left cursor-pointer" onClick={() => sort('name')}><span className="flex items-center gap-1">Customer <SortIcon k="name" /></span></th>
@@ -148,7 +141,6 @@ export default function CustomersPage() {
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </PageShell>
   );
 }
