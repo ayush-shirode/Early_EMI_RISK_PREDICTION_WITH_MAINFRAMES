@@ -5,7 +5,7 @@ A step-by-step script for presenting the project (about 12 minutes, plus questio
 ## 1. Before the demo
 
 ### The day before
-1. Check that Z Xplore accepts your login: `zowe zosmf check status` → "user Z72230 successfully connected". If the password expired, renew it on the Z Xplore site and run `zowe config secure`.
+1. Check that Z Xplore accepts your login: `make tui` → both channels `UP` on the connection panel (option 1). If the password expired, renew it on the Z Xplore site and run `make login`.
 2. Start the app: `cd ~/mainframes/CP && make dev`.
 3. Open http://localhost:3000/mainframe and make sure all five checklist steps are green. If not, run the missing ones (setup ≈ 1.5 min, data ≈ 1 min, training ≈ 2.5 min).
 4. Run **Run batch & score** once, so there is a fresh run with a complete history and report.
@@ -18,7 +18,7 @@ A step-by-step script for presenting the project (about 12 minutes, plus questio
    * http://localhost:3000/customers
 2. Zoom the browser to 110–125% so the audience can read the tables.
 3. Click **Re-check** on the Overview page: the card must say *Connected to S0W1…*.
-4. Optional: open VS Code with Zowe Explorer, filter `Z72230.EWS.*`. It shows the same data sets as the app and is a good answer to "is this really on the mainframe?".
+4. Optional: keep `make tui` open in a second window. Its DSLIST, SDSF and COMMAND panels (`/D IPLINFO`) are a good answer to "is this really on the mainframe?".
 
 ### If the mainframe is unreachable during the demo
 The risk pages (Dashboard, Customers, AI Analysis, Comparison, EMI Forecast, Reports of the last run, Model) work from the local copy of the last batch run. Show those, and show a finished run's page (Batch runs → latest run) with its job steps and return codes, which are stored locally. Say clearly that the live mainframe is down and you are showing the last run's results.
@@ -28,7 +28,7 @@ The risk pages (Dashboard, Customers, AI Analysis, Comparison, EMI Forecast, Rep
 | # | Time | Where | Do | Say |
 |---|---|---|---|---|
 | 1 | 0:00 | — | — | "Banks usually notice EMI trouble after a payment is missed. This system predicts stress 90 days ahead, from data that lives on an IBM mainframe, and explains every prediction." |
-| 2 | 0:45 | **Mainframe → Overview** | Point at the connection card | "This is a real IBM z/OS 3.1 system (IBM Z Xplore). The app connects through Zowe: the backend calls Zowe CLI, which calls the z/OSMF REST API. The browser never sees my mainframe password; it stays in the Zowe secure store." |
+| 2 | 0:45 | **Mainframe → Overview** | Point at the connection card | "This is a real IBM z/OS 3.1 system (IBM Z Xplore). The backend has its own client for the z/OSMF REST API, and the operator console adds a second channel over SSH. The browser never sees my mainframe password; it stays in the OS keyring." |
 | 3 | 1:30 | Overview checklist | Walk down steps 1–5 | "Everything is a button: allocate the libraries and compile the COBOL, upload the data, train, run the batch. No terminal, no 3270 screen." |
 | 4 | 2:15 | **Data sets** | Click `Z72230.EWS.CUSTMAST` | "The data is stored the mainframe way: sequential data sets with fixed-length 100-byte EBCDIC records, described by a COBOL copybook. No SQL database." Then click `Z72230.EWS.JCL` → `EWSBATCH`: "This is the batch job." |
 | 5 | 3:00 | **Batch runs** | Pick as-of `2026-09-30`, click **Run batch & score** | "This submits the job to JES on z/OS. Watch the steps come in." |
@@ -42,7 +42,7 @@ The risk pages (Dashboard, Customers, AI Analysis, Comparison, EMI Forecast, Rep
 | 13 | 8:30 | **Dashboard** | In *What-if*, lower the EMI (e.g. 13312 → 6000), click **Re-score with model** | "If the bank restructured this loan to a lower EMI, the model re-scores the customer with all other mainframe features unchanged. For this customer it barely moves (88% → 86% with an EMI of ₹6,000), because the real problem is spending, not the EMI size: restructuring alone would not help, which is exactly the kind of insight the explanation is for." |
 | 14 | 9:30 | **Mainframe → Reports → Intervention report** | Scroll the report | "This report was printed by COBOL on z/OS from the scores we wrote back, so operations teams can work from the mainframe as usual." |
 | 15 | 10:15 | **Model** | Point at the cards and the tier table | "Trained on four quarter-end snapshots, validated on a later one, never on a random split. ROC-AUC 0.825; of the customers marked High, 74% really ran into EMI stress, against a 10.6% base rate. The top drivers are early signals (spending and liquidity), not past defaults." |
-| 16 | 11:15 | — | — | "To sum up: the mainframe is the system of record and does all data preparation and auditing; Python adds prediction and explanation; Zowe connects them; and one web app operates everything." |
+| 16 | 11:15 | — | — | "To sum up: the mainframe is the system of record and does all data preparation and auditing; Python adds prediction and explanation; our own z/OSMF and SSH clients connect them; and one web app operates everything." |
 
 ### Short version (5 minutes)
 Steps 2 → 5/6 → 7 → 11 → 12 → 15.
@@ -65,7 +65,7 @@ Numbers change if you regenerate the data with another seed or customer count.
 |---|---|
 | Why use a mainframe at all? | Most core banking data still lives on z/OS, and nightly batch (sort, validate, match, reconcile) is how it is processed. The project shows ML added on top of that, without moving the data preparation off the mainframe. |
 | What database is used? | On z/OS, sequential data sets (QSAM) with COBOL copybook layouts; no VSAM or DB2. Locally, SQLite only caches results for the web pages. See [MAINFRAME_DATASETS.md](MAINFRAME_DATASETS.md). |
-| How does the app talk to the mainframe? | Zowe CLI → z/OSMF REST API over HTTPS with the user's credentials from the Zowe secure store. See [MAINFRAME_CONNECTION.md](MAINFRAME_CONNECTION.md). |
+| How does the app talk to the mainframe? | Our own client for the z/OSMF REST API over HTTPS (data sets and jobs), plus SSH to z/OS UNIX for the operator console and our agent there. Credentials come from the OS keyring. See [MAINFRAME_CONNECTION.md](MAINFRAME_CONNECTION.md). |
 | How do you know the COBOL is correct? | The same rules are implemented in Python; a test compares the mainframe's output with them for every customer and every field. They match exactly. |
 | Is the data real? | No, it is synthetic, because Z Xplore is a shared IBM education system. The generator builds in realistic early-warning patterns (spending rises and balances fall before payments fail) and about 1% bad records. |
 | Why not a random train/test split? | Each customer appears in several quarterly snapshots; a random split would leak information. Validation uses the latest snapshot only. |

@@ -1,6 +1,6 @@
 # Backend and local database
 
-Code: `api/main.py` (FastAPI), `pipeline/` (runner, actions, Zowe wrapper, SQLite), `ml/` (scoring).
+Code: `api/main.py` (FastAPI), `pipeline/` (runner, actions, z/OSMF client, SSH channel, SQLite), `ml/` (scoring).
 
 Start with `make dev` or `make api`. It listens on **127.0.0.1:8000 only**, because it acts with your mainframe credentials. Interactive API docs: http://127.0.0.1:8000/docs.
 
@@ -9,7 +9,10 @@ Start with `make dev` or `make api`. It listens on **127.0.0.1:8000 only**, beca
 | Module | Responsibility |
 |---|---|
 | `pipeline/config.py` | paths, HLQ, as-of dates, tier thresholds; `Names` builds every data set name from the HLQ |
-| `pipeline/zowe.py` | one function per Zowe CLI command; JSON parsing, retries, step-RC parsing ([MAINFRAME_CONNECTION.md](MAINFRAME_CONNECTION.md)) |
+| `pipeline/zosconf.py` | host, ports, user ID (`~/.config/ews/zos.json`) and password (OS keyring); `python -m pipeline.zosconf login` |
+| `pipeline/zos.py` | our z/OSMF REST client: one function per data set or job operation; retries, error messages, step-RC parsing ([MAINFRAME_CONNECTION.md](MAINFRAME_CONNECTION.md)) |
+| `pipeline/uss.py` | SSH channel to z/OS UNIX: commands, host-key pinning, installing and calling the EWS agent |
+| `pipeline/oplog.py` | operator log: every mainframe call, job, run step and connection change, with message IDs |
 | `pipeline/actions.py` | the eight actions behind the Control Center buttons, each a list of named steps |
 | `pipeline/runner.py` | runs one action at a time in a background thread and records every step in SQLite |
 | `pipeline/db.py` | SQLite schema and helpers |
@@ -48,14 +51,15 @@ POST /actions/run_batch {"asof": 20260930}
 GET /runs/{id}  (the UI polls every 2 s while status='running')
 ```
 
-Each run also gets a folder `data/runs/<id>/` with every downloaded file (features, RUNCTL, rejects, exceptions, master data, scores, report) and `error.txt` with the Python traceback if it failed. If the backend restarts during a run, the run is marked failed at the next start.
+Each run also gets a folder `data/runs/<id>/` with every downloaded file (features, RUNCTL, rejects, exceptions, master data, scores, report) and `error.txt` with the Python traceback if it failed. Only one run is active at a time across the backend, the operator console and the CLI: `runner.start` checks for a `running` run and inserts the new one inside one `BEGIN IMMEDIATE` transaction. A run whose process (`runs.pid`) has died is marked failed then, and also when the backend starts.
 
 ## 4. Local database (SQLite)
 
 File: `CP/data/ews.sqlite` (path overridable with `EWS_DB`). WAL mode; all writes go through one lock. It is a **cache of what the mainframe produced** plus run history; deleting it loses only history (run a batch again to repopulate).
 
 ```sql
-runs(id PK, action, params JSON, status running|ok|failed, started_at, finished_at, error, summary JSON)
+runs(id PK, action, params JSON, status running|ok|failed, started_at, finished_at, error, summary JSON,
+     pid, source API|TUI|CLI)                                    -- pid = process running it
 run_steps(run_id, seq, name, status pending|running|ok|failed|skipped,
           started_at, finished_at, detail, data JSON)            -- PK (run_id, seq)
 customers(cust_id PK, name, city, emp_type, age, monthly_income, credit_score, open_date, status)
@@ -66,6 +70,8 @@ monthly(cust_id, yyyymm, credits, debits, salary, min_bal, avg_bal, bounces, cc_
 predictions(id PK, run_id, cust_id, as_of, probability, tier, action, top_factor, reasoning,
             features JSON, shap JSON, model_version, created_at) -- indexes (cust_id,id), (run_id)
 kv(key PK, value JSON)    -- last_score_run, data (generator settings), setup_done, compiled
+oplog(id PK, ts, pid, channel ZOSMF|SSH|RUN|CONN, level I|W|E, msgid, text, ms)
+                                                                 -- operator log, last 20,000 rows
 ```
 
 | Table | Filled from | When |

@@ -60,7 +60,7 @@ export default function MainframeOverview() {
     );
   }
   if (!status) {
-    return <div className="flex items-center gap-2 text-gray-400 text-sm"><Loader2 className="animate-spin" size={16} /> Checking the mainframe (several Zowe calls)…</div>;
+    return <div className="flex items-center gap-2 text-gray-400 text-sm"><Loader2 className="animate-spin" size={16} /> Checking the mainframe (several z/OSMF calls)…</div>;
   }
 
   const mf = status.mainframe;
@@ -110,8 +110,8 @@ export default function MainframeOverview() {
 
       <div className="space-y-3">
         <Step n={1} title="Connect to z/OS" done={connected} active={next === 1}
-          detail={connected ? 'z/OSMF answers with your Zowe profile credentials.'
-            : <>Zowe CLI could not reach z/OSMF. Credentials live in the Zowe secure store; set them once in a terminal with <span className="font-mono">zowe config secure</span>, then re-check.</>}>
+          detail={connected ? 'z/OSMF accepts the stored logon credentials.'
+            : <>The backend could not reach z/OSMF. Log on once in a terminal with <span className="font-mono">make login</span> (or on the LOGON panel of <span className="font-mono">make tui</span>), then re-check.</>}>
           <ActionButton action="test_connection" label="Test connection" variant="secondary" disabled={busy} />
         </Step>
 

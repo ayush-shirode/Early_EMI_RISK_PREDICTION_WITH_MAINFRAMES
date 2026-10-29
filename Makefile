@@ -4,7 +4,7 @@
 PY      := .venv/bin/python
 UVICORN := .venv/bin/uvicorn
 
-.PHONY: install dev api web test check-zowe clean
+.PHONY: install dev api web tui login login-ssh test clean
 
 install:            ## Python venv + dashboard packages
 	python3 -m venv .venv
@@ -12,7 +12,7 @@ install:            ## Python venv + dashboard packages
 	$(PY) -m pip install -q -r ml/requirements.txt
 	cd dashboard && npm install --no-audit --no-fund
 
-dev: check-zowe     ## Start backend (:8000) and dashboard (:3000) together
+dev:                ## Start backend (:8000) and dashboard (:3000) together
 	@echo "Backend  http://127.0.0.1:8000/docs"
 	@echo "Dashboard http://localhost:3000"
 	@trap 'kill 0' INT TERM EXIT; \
@@ -25,11 +25,18 @@ api:                ## Backend only
 web:                ## Dashboard only
 	cd dashboard && NEXT_TELEMETRY_DISABLED=1 npx next dev -p 3000
 
+tui:                ## Mainframe operator console (3270-style terminal UI)
+	$(PY) -m tui
+
+login:              ## Store z/OS host, user ID and password (password goes to the OS keyring)
+	$(PY) -m pipeline.zosconf login
+
+login-ssh:          ## Trust the z/OS SSH host key and install the EWS agent on USS
+	$(PY) -m pipeline.uss trust
+	$(PY) -m pipeline.uss install
+
 test:               ## Unit tests (offline) + mainframe golden test if a batch run exists
 	$(PY) -m pytest -q tests
-
-check-zowe:
-	@command -v zowe >/dev/null || (echo "Zowe CLI not found: npm install -g @zowe/cli" && exit 1)
 
 clean:              ## Remove local run data (not the mainframe data sets)
 	rm -rf data/runs data/ews.sqlite* dashboard/.next

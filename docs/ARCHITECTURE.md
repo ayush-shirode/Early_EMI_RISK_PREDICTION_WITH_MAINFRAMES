@@ -10,11 +10,11 @@
                      ├─ api/main.py          REST endpoints
                      ├─ pipeline/runner.py   background executor, one action at a time
                      ├─ pipeline/actions.py  the Control Center actions (named steps)
-                     ├─ pipeline/zowe.py     the ONLY module that talks to the mainframe
+                     ├─ pipeline/zos.py      our z/OSMF REST client: every data set and job call
                      ├─ ml/*                 generator, training, scoring, SHAP
                      └─ data/ews.sqlite      local copy of results (runs, customers, predictions)
                      │
-                     │ subprocess: `zowe ... --rfj`  (Zowe CLI v3, team config + secure store)
+                     │ HTTPS, basic auth then LTPA cookie (credentials: pipeline/zosconf.py + OS keyring)
                      ▼
                    z/OSMF REST API  https://204.90.115.200:10443   (TLS, basic auth)
                      ├─ /zosmf/restfiles/ds   data sets: list, create, upload, download, delete
@@ -31,7 +31,8 @@
 | UI | Next.js 14.2 (App Router), React 18, Tailwind, Recharts | `dashboard/` |
 | API | FastAPI + Uvicorn (Python 3.11) | `api/main.py` |
 | Orchestration | Python threads, SQLite | `pipeline/runner.py`, `pipeline/actions.py`, `pipeline/db.py` |
-| Mainframe access | Zowe CLI 8.36 (Zowe v3.6) → z/OSMF | `pipeline/zowe.py` |
+| Mainframe access | own z/OSMF REST client (`requests`); SSH channel (`paramiko`) + agent on USS | `pipeline/zos.py`, `pipeline/uss.py`, `mainframe/uss/ewsagent.py` |
+| Operator console | Textual (terminal UI) | `tui/` |
 | Mainframe processing | JCL, DFSORT/ICETOOL, Enterprise COBOL 6.5, REXX | `mainframe/` |
 | ML | pandas, scikit-learn, XGBoost, SHAP | `ml/` |
 
@@ -49,7 +50,7 @@ No VSAM or DB2 is used, as planned: everything on z/OS is QSAM sequential files 
 ```
 User clicks "Run batch & score" (as-of 2026-09-30)
 │
-├─1  zowe zos-jobs submit data-set "Z72230.EWS.JCL(EWSBATCH)" --js "ASOFDT=20260930 MODE=SCORE" --wfo
+├─1  PUT /zosmf/restjobs/jobs {"file":"//'Z72230.EWS.JCL(EWSBATCH)'"}  X-IBM-JCL-Symbol-ASOFDT/MODE, poll to OUTPUT
 │     JES2 runs EWSBATCH on z/OS:
 │       STEP005/006 IEFBR14   clean up, allocate REJECTS + CTLTOT
 │       STEP010 ICETOOL       CUSTMAST → CUST.SRT (sorted, duplicates → CUST.DUPS)
@@ -62,15 +63,15 @@ User clicks "Run batch & score" (as-of 2026-09-30)
 │       STEP080 DFSORT        FEATURES → FEATCSV (CSV, variable length)
 │       STEP090 REXX EWSRECON reconcile all counts → RUNCTL (STATUS=OK|OUT_OF_BALANCE)
 ├─2  backend reads step return codes from the JESYSMSG spool (IEF142I lines)
-├─3  zowe download: FEATCSV, RUNCTL, REJECTS, EXCEPT; refuses to continue unless STATUS=OK
-├─4  zowe download: CUST.VALID, LOAN.VALID, TXN.SRT → SQLite (names, loans, history for the UI)
+├─3  download: FEATCSV, RUNCTL, REJECTS, EXCEPT; refuses to continue unless STATUS=OK
+├─4  download: CUST.VALID, LOAN.VALID, TXN.SRT → SQLite (names, loans, history for the UI)
 ├─5  Python: XGBoost probability + SHAP for every customer → SQLite predictions
-├─6  Python writes SCOREREC records → zowe create + upload → Z72230.EWS.SCORES
-├─7  zowe submit EWSRPTJ: DFSORT sorts scores by risk, COBOL EWSRPT prints RISKRPT
-└─8  zowe download RISKRPT → shown in the dashboard's Reports page
+├─6  Python writes SCOREREC records → create + upload → Z72230.EWS.SCORES
+├─7  submit EWSRPTJ: DFSORT sorts scores by risk, COBOL EWSRPT prints RISKRPT
+└─8  download RISKRPT → shown in the dashboard's Reports page
 ```
 
-Every arrow that touches z/OS is a Zowe CLI call; see [MAINFRAME_CONNECTION.md](MAINFRAME_CONNECTION.md) for the exact commands.
+Every arrow that touches z/OS is one z/OSMF REST call made by `pipeline/zos.py`; see [MAINFRAME_CONNECTION.md](MAINFRAME_CONNECTION.md) for the exact requests.
 
 ## 4. Training flow
 
@@ -81,10 +82,12 @@ Every arrow that touches z/OS is a Zowe CLI call; see [MAINFRAME_CONNECTION.md](
 | Decision | Why |
 |---|---|
 | Mainframe does all data preparation | That is the point of the project: the batch is the system of record and the ML only consumes its output. It also mirrors how banks actually run nightly batch. |
-| Zowe CLI from the backend, not from the browser | The browser never holds mainframe credentials; the backend uses the Zowe secure store. Zowe CLI is the supported, scriptable Zowe interface and matches what Zowe Explorer uses underneath. |
+| Own z/OSMF client in the backend, not in the browser | The browser never holds mainframe credentials; the backend reads them from the OS keyring. Calling z/OSMF directly removes the Zowe CLI dependency (Node.js, one subprocess per call) and lets every call be logged with its timing. |
+| A second channel over SSH | z/OSMF cannot run commands. SSH to USS gives the operator console a shell, TSO and console commands, and a place for our own agent; it also gives an independent check of whether the system is up. |
+| Run lock in SQLite, not in memory | The backend, the operator console and the CLI can all start actions; a check-and-insert inside `BEGIN IMMEDIATE` and the owning process ID keep it to one run at a time, and a run whose process died stops blocking. |
 | Whitelisted actions instead of a generic "run command" API | The web API acts with your z/OS identity. It can only start eight named actions with validated parameters, and data set names are always built server-side. |
 | One action at a time | All runs share the same `EWS.*` data sets; a second run would overwrite the first. |
-| Display (zoned) numerics in every file that crosses the boundary | Zowe text-mode transfer converts ASCII ⇄ EBCDIC byte by byte. Packed decimal (COMP-3) would be corrupted, so COMP-3 is used only inside COBOL working storage. |
+| Display (zoned) numerics in every file that crosses the boundary | z/OSMF text-mode transfer converts ASCII ⇄ EBCDIC byte by byte. Packed decimal (COMP-3) would be corrupted, so COMP-3 is used only inside COBOL working storage. |
 | COBOL writes numeric-edited features, DFSORT builds the CSV | No numeric conversion is needed in DFSORT, and the fixed record stays human-readable on the mainframe. |
 | A Python reference implementation of the COBOL rules (`ml/features_ref.py`) | Lets the mainframe output be verified field by field (golden test) and the ML be developed offline. |
 | XGBoost + SHAP, not an LLM | The old project asked an LLM for a probability. A trained classifier has measurable accuracy and SHAP gives exact, additive explanations. |

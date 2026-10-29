@@ -6,6 +6,7 @@ batch produced, so the dashboard can be served quickly and still work offline.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -22,7 +23,9 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at   TEXT NOT NULL,
     finished_at  TEXT,
     error        TEXT,
-    summary      TEXT NOT NULL DEFAULT '{}'
+    summary      TEXT NOT NULL DEFAULT '{}',
+    pid          INTEGER,                    -- process running it (backend, TUI or CLI)
+    source       TEXT                        -- API | TUI | CLI
 );
 CREATE TABLE IF NOT EXISTS run_steps (
     run_id       INTEGER NOT NULL REFERENCES runs(id),
@@ -67,6 +70,16 @@ CREATE TABLE IF NOT EXISTS predictions (
 CREATE INDEX IF NOT EXISTS pred_cust ON predictions(cust_id, id DESC);
 CREATE INDEX IF NOT EXISTS pred_run ON predictions(run_id);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS oplog (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts      TEXT NOT NULL,
+    pid     INTEGER,
+    channel TEXT,                            -- ZOSMF | SSH | RUN | CONN
+    level   TEXT,                            -- I | W | E
+    msgid   TEXT,
+    text    TEXT,
+    ms      INTEGER
+);
 """
 
 _lock = threading.RLock()
@@ -96,13 +109,36 @@ def tx():
             con.close()
 
 
+def pid_alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def fail_orphaned_runs(con: sqlite3.Connection) -> None:
+    """A run lives in the thread of the process that started it; if that process is gone, so is the run."""
+    for r in con.execute("SELECT id, pid FROM runs WHERE status='running'").fetchall():
+        if not pid_alive(r["pid"]):
+            con.execute("UPDATE runs SET status='failed', error='The process running it ended', finished_at=? "
+                        "WHERE id=?", (now(), r["id"]))
+            con.execute("UPDATE run_steps SET status='failed' WHERE run_id=? AND status='running'", (r["id"],))
+            con.execute("UPDATE run_steps SET status='skipped' WHERE run_id=? AND status='pending'", (r["id"],))
+
+
 def init() -> None:
     with tx() as con:
         con.executescript(SCHEMA)
-        # A run cannot survive a backend restart: mark leftovers as failed.
-        con.execute("UPDATE runs SET status='failed', error='Backend restarted while the run was active', "
-                    "finished_at=? WHERE status='running'", (now(),))
-        con.execute("UPDATE run_steps SET status='failed' WHERE status='running'")
+        cols = {r["name"] for r in con.execute("PRAGMA table_info(runs)")}
+        for col, typ in (("pid", "INTEGER"), ("source", "TEXT")):
+            if col not in cols:
+                con.execute(f"ALTER TABLE runs ADD COLUMN {col} {typ}")
+        fail_orphaned_runs(con)
 
 
 def query(sql: str, args: tuple = ()) -> list[dict]:

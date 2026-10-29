@@ -1,7 +1,7 @@
 """Backend logic that does not need a mainframe: parsers, step-RC parsing, API validation."""
 from fastapi.testclient import TestClient
 
-from pipeline import actions, zowe
+from pipeline import actions, zos
 
 JESYSMSG = """
  IEF142I EWSBATCH STEP005 - STEP WAS EXECUTED - COND CODE 0000
@@ -13,9 +13,9 @@ JESYSMSG = """
 
 
 def test_step_results_parsing(monkeypatch):
-    monkeypatch.setattr(zowe, "spool_files", lambda j: [{"ddname": "JESYSMSG", "id": 4}])
-    monkeypatch.setattr(zowe, "spool_content", lambda j, i: JESYSMSG)
-    steps = zowe.step_results("JOB00001")
+    monkeypatch.setattr(zos, "spool_files", lambda j: [{"ddname": "JESYSMSG", "id": 4}])
+    monkeypatch.setattr(zos, "spool_content", lambda j, i: JESYSMSG)
+    steps = zos.step_results("JOB00001")
     assert steps[0] == {"step": "STEP005", "procstep": None, "rc": 0, "status": "executed"}
     assert steps[1]["rc"] == 4
     assert steps[2]["status"] == "abended" and steps[2]["abend"] == "S0C7"

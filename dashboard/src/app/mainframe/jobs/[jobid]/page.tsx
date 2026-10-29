@@ -9,7 +9,7 @@ interface Spool {
   files: { id: number; ddname: string; stepname: string | null; procstep: string | null; 'record-count'?: number }[];
 }
 
-/** JES spool output of one job, read from z/OS through Zowe. */
+/** JES spool output of one job, read from z/OS through the z/OSMF jobs API. */
 export default function JobPage({ params }: { params: { jobid: string } }) {
   const [spool, setSpool] = useState<Spool | null>(null);
   const [active, setActive] = useState<number | null>(null);

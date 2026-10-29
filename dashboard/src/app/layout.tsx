@@ -4,7 +4,7 @@ import { CustomerProvider } from '@/context/CustomerContext';
 
 export const metadata: Metadata = {
   title: 'Vigilance AI — EMI Stress Early Warning',
-  description: 'Mainframe batch (z/OS, COBOL, DFSORT, REXX via Zowe) + machine-learning early warning for EMI repayment stress.',
+  description: 'Mainframe batch (z/OS, COBOL, DFSORT, REXX via z/OSMF) + machine-learning early warning for EMI repayment stress.',
 };
 
 export default function RootLayout({

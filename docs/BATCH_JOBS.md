@@ -20,7 +20,7 @@ Sources live in `CP/mainframe/` and are uploaded by **Set up mainframe** to the 
 
 ## 2. EWSBATCH — the main batch
 
-Symbols (from Zowe `--jcl-symbols`): `ASOFDT` = as-of date `YYYYMMDD`, `MODE` = `SCORE` or `TRAIN`.
+Symbols (sent as `X-IBM-JCL-Symbol-*` headers on the z/OSMF submit): `ASOFDT` = as-of date `YYYYMMDD`, `MODE` = `SCORE` or `TRAIN`.
 
 | Step | Program | Input → Output | Control | Normal RC |
 |---|---|---|---|---|

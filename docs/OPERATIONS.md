@@ -6,10 +6,10 @@
 |---|---|
 | Node.js 18+ and npm | `node -v` |
 | Python 3.11+ | `python3 --version` |
-| Zowe CLI v3 | `zowe --version` (install: `npm install -g @zowe/cli`) |
-| A Zowe profile that reaches z/OSMF | `zowe zosmf check status` → "user … successfully connected" |
+| An OS keyring (GNOME Keyring / KWallet on Linux, Keychain on macOS) | `python -c "import keyring; print(keyring.get_keyring())"` |
+| A z/OS user ID with z/OSMF and SSH access | `make login` → "Logged on: …" |
 
-To create the profile on a new machine: `zowe config init --global-config`, set `host` and `port` (Z Xplore: `204.90.115.200`, `10443`, `rejectUnauthorized: false`), then `zowe config secure` to store user and password.
+On a new machine: `make login` (Z Xplore: host `204.90.115.200`, z/OSMF port `10443`, SSH port `22`, verify TLS `n`), then `make login-ssh` to pin the SSH host key and install the agent. Both can also be done in `make tui` (LOGON panel, then `SSHKEY` and `INSTALL` on the connection panel).
 
 ## 2. Install and start
 
@@ -43,17 +43,22 @@ make test        # = .venv/bin/python -m pytest -q tests
 |---|---|
 | `test_layouts.py` | Python layouts = copybooks (every field length, every LRECL); FEAT2CSV member = generated from the layouts; all mainframe sources are ASCII and fit their fixed columns |
 | `test_generator_and_rules.py` | records have exact lengths; generator is deterministic; every injected defect is rejected with the expected reason code; TRAIN/SCORE label behaviour; **no data after the as-of date affects features** |
+| `test_zos.py` | the z/OSMF client builds the right requests (JCL symbols as headers, quoted upper-case data set paths, half-track block sizes) and reports z/OSMF errors; a run in another live process blocks a new one, and a dead process's run is cleaned up |
 | `test_pipeline.py` | JESYSMSG step-RC parsing (normal, proc step, skipped, abend); RUNCTL/REJREC parsing; API rejects unknown actions, bad parameters, bad job IDs and non-project data set names |
 | `test_mainframe_golden.py` | **the CSV produced by COBOL on z/OS equals the Python reference rules for every customer and every field** (runs on the latest downloaded batch output; skipped if none) |
 
-Current result: 31 passed.
+Current result: 34 passed, 1 skipped (the golden test, until a new batch run is downloaded).
 
 ## 6. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
 | Header shows `BACKEND OFFLINE` | backend not running: `make dev` or `make api` |
-| `MAINFRAME OFFLINE` / "not connected" | z/OSMF unreachable or password expired. Run `zowe zosmf check status` in a terminal; reset with `zowe config secure`. Z Xplore can also be down for maintenance. Already-scored results stay visible. |
+| `MAINFRAME OFFLINE` / "not connected" | z/OSMF unreachable or password expired. Check with `make tui` (connection panel shows the last error) or `python -m pipeline.zosconf show`; log on again with `make login`. Z Xplore can also be down for maintenance. Already-scored results stay visible. |
+| `z/OSMF rejected the user ID or password (HTTP 401)` | password changed or expired: `make login` |
+| SSH channel `NOKEY` in the console | the SSH host key is not trusted yet: `make login-ssh`, or `SSHKEY` on the connection panel |
+| `The EWS agent is not installed on USS yet` | `make login-ssh`, or `INSTALL` on the connection panel |
+| `409 Run #N is still active (started from the TUI)` | the operator console is running an action; wait for it (the console's PIPELINE panel shows it live) |
 | `409 Run #N is still active` | one action at a time; open the run from the banner and wait |
 | A step failed with `Job EWSBATCH (JOB…) failed: step STEP050 RC=8` | more than 10% of customer records were rejected; open the job output and Reports → Rejected records |
 | `... abended S0C7` | a COBOL program read non-numeric data in a numeric field; check the generator/layout change you made and `make test` |
@@ -67,7 +72,9 @@ Logs: the run page shows each step's error; the full Python traceback is in `dat
 
 ## 7. Security notes
 
-* Mainframe credentials stay in the Zowe secure store (OS keyring); they are never in the repo, `.env`, the database or the browser.
+* The mainframe password stays in the OS keyring (service `ews-zos`); it is never in the repo, `.env`, the database, a log or the browser. `~/.config/ews/zos.json` holds only host, ports and user ID.
+* The z/OS SSH host key is pinned in `~/.config/ews/known_hosts`; a changed key refuses the connection.
+* The operator console acts with the user's full z/OS authority (its command shell is a real shell). It runs locally, in the user's own terminal.
 * The backend binds to 127.0.0.1. The API exposes eight fixed actions with validated parameters; data set names are built server-side; previews are limited to `HLQ.EWS.*`; job IDs are pattern-checked.
 * Only synthetic data is uploaded to Z Xplore, a shared IBM education system.
 * `data/` (local database, downloaded files) and `ml/artifacts/` are git-ignored.
@@ -75,4 +82,4 @@ Logs: the run page shows each step's error; the full Python traceback is in `dat
 ## 8. Clean up
 
 * Local: `make clean` (removes run folders, the SQLite file and the Next.js build).
-* Mainframe: **Reset data** in the Control Center deletes all `EWS.*` data sets except the source libraries. To remove everything, also delete `Z72230.EWS.JCL/CPY/CNTL/REXX` and the `EWS*` members of `Z72230.CBL` and `Z72230.LOAD` (e.g. in Zowe Explorer).
+* Mainframe: **Reset data** in the Control Center deletes all `EWS.*` data sets except the source libraries. To remove everything, also delete `Z72230.EWS.JCL/CPY/CNTL/REXX`, the `EWS*` members of `Z72230.CBL` and `Z72230.LOAD`, and `~/ews` on USS.

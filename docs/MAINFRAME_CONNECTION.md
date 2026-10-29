@@ -1,88 +1,96 @@
 # How the software connects to the mainframe
 
-## 1. The chain
+The project has its own clients for two independent channels to z/OS. No third-party mainframe client (Zowe CLI or similar) is needed.
+
+## 1. The two channels
 
 ```
-FastAPI backend ──subprocess──► Zowe CLI ──HTTPS (TLS)──► z/OSMF REST API ──► z/OS services
- pipeline/zowe.py               `zowe ... --rfj`          204.90.115.200:10443   JES2, catalog, SMS, data set I/O
+                         ┌─ channel 1: HTTPS ─────────────────────────────────────────────┐
+ web backend   ─┐        │ pipeline/zos.py ──► z/OSMF REST API  204.90.115.200:10443       │
+ operator TUI  ─┼─ pipeline ─►                    /zosmf/restfiles  data sets             │──► z/OS 3.1 (S0W1)
+ CLI           ─┘        │                        /zosmf/restjobs   JES2 jobs, spool       │    JES2, catalog, SMS
+                         ├─ channel 2: SSH ───────────────────────────────────────────────┤    USS, TSO, console
+                         │ pipeline/uss.py ──► sshd on z/OS UNIX   204.90.115.200:22      │
+                         │                       shell, TSO (tsocmd), console (opercmd),   │
+                         │                       our agent ~/ews/ewsagent.py               │
+                         └─────────────────────────────────────────────────────────────────┘
 ```
 
-* **z/OS** is the operating system (here z/OS 3.1 on the IBM Z Xplore system `S0W1.DAL-EBIS.IHOST.COM`).
-* **z/OSMF** (z/OS Management Facility, version 29) is IBM's web server on z/OS. It exposes REST APIs; this project uses two of them:
-  * **z/OS data set and file REST interface** (`/zosmf/restfiles/...`): list, create, read, write and delete data sets and members.
-  * **z/OS jobs REST interface** (`/zosmf/restjobs/...`): submit JCL, get job status, list and read spool files.
-* **Zowe CLI** (v8.36, part of Zowe v3.6, an Open Mainframe Project) is a command-line client for those APIs. Zowe Explorer in VS Code uses the same Zowe SDK and the same profiles.
-* **`pipeline/zowe.py`** is the only Python module that touches the mainframe. Every function in it runs exactly one Zowe CLI command.
+| Channel | Module | Carries | Used by |
+|---|---|---|---|
+| **z/OSMF REST** (HTTPS) | `pipeline/zos.py` | everything in the batch pipeline: allocate, upload, submit, wait, step RCs, download, delete | web backend, TUI, CLI |
+| **SSH to USS** | `pipeline/uss.py` | operator work: shell, TSO and console commands, the EWS agent, record counts | TUI |
 
-There is no database driver, no FTP and no 3270 terminal emulation anywhere in the project.
+* **z/OSMF** (z/OS Management Facility, version 29) is IBM's web server on z/OS. Its REST services give programmatic access to data sets and JES. `pipeline/zos.py` calls them directly with `requests`.
+* **USS** (z/OS UNIX System Services) is the POSIX side of z/OS. Its OpenSSH server (OpenSSH 8.4) accepts the same user ID and password. From there the IBM tools are available: `tsocmd` for TSO/E, ZOAU 1.3.6 (`jls`, `dls`, `dcat`, `opercmd`) and Python 3.9. `pipeline/uss.py` uses `paramiko`.
 
-## 2. Authentication and configuration
+## 2. Credentials and configuration (`pipeline/zosconf.py`)
 
-Zowe CLI reads its **team configuration** from `~/.zowe/zowe.config.json`:
+| What | Where |
+|---|---|
+| host, z/OSMF port, SSH port, user ID, verify-TLS flag | `~/.config/ews/zos.json` (not secret) |
+| password | the OS keyring (Secret Service on Linux, Keychain on macOS), service `ews-zos`, account = user ID |
+| trusted SSH host key | `~/.config/ews/known_hosts` |
+| overrides (CI, containers) | `EWS_ZOS_HOST`, `EWS_ZOS_PORT`, `EWS_ZOS_USER`, `EWS_ZOS_PASSWORD`, `EWS_SSH_PORT`, `EWS_ZOS_VERIFY` |
 
-```json
-"zosmf":       { "type": "zosmf", "properties": { "port": 10443 } },
-"global_base": { "type": "base",  "properties": { "host": "204.90.115.200", "rejectUnauthorized": false },
-                 "secure": ["user", "password"] }
+Set it up once:
+
+```bash
+make login         # prompts for host, ports, user ID, password; tests the logon against z/OSMF
+make login-ssh     # fetches and pins the SSH host key, installs the EWS agent on USS
 ```
 
-* `host` and `port` identify z/OSMF; `rejectUnauthorized: false` accepts the Z Xplore self-signed certificate.
-* `user` and `password` are listed under `secure`: they are **not** in the file. Zowe stores them in the operating system's credential store (the "secure store", via the keyring). They are set once with `zowe config secure` (or by Zowe Explorer's login prompt).
-* Every request is HTTPS with HTTP basic authentication (`Auth type used: basic`).
+The TUI's LOGON panel (option 0) does the same as `make login`; its connection panel has `SSHKEY` and `INSTALL` for the SSH part, and shows the host-key fingerprint before trusting it. To migrate an existing Zowe setup once, use `python -m pipeline.zosconf login --from-zowe`: it reads host and ports from `~/.zowe/zowe.config.json` and the user ID and password from Zowe's keyring entry. Nothing reads Zowe after that.
 
-Consequences for this project:
+* The z/OS user ID is also the **high-level qualifier** of every data set (`Z72230.EWS.*`). Set `EWS_HLQ` to override.
+* Z Xplore uses a self-signed certificate, so `verify` is `false` there. Leave it `true` on any system with a proper certificate.
+* The SSH host key was checked against the one Zowe had already pinned for this host (`ssh-rsa 4c:3f:9e:4f:92:e9:e2:97:5f:1c:bc:bc:d2:01:a7:33`). If the key ever changes, connections are refused (`EWS301E ... HOST KEY ... CHANGED`).
 
-* The backend never sees or stores the password; it only invokes `zowe`, which reads the secure store itself.
-* The backend must run as your local user on the desktop (not inside Docker), so it can reach the keyring.
-* The z/OS user ID (`Z72230`) is read from `zowe zosmf check status` and becomes the **high-level qualifier** of every data set (`Z72230.EWS.*`). Set `EWS_HLQ` to override.
-
-## 3. How a call is made (`pipeline/zowe.py`)
+## 3. Channel 1: the z/OSMF REST client (`pipeline/zos.py`)
 
 ```python
-def run(*args, timeout=180, retries=3):
-    cmd = ["zowe", *args, "--rfj"]          # --rfj = response format JSON
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    resp = json.loads(p.stdout)             # {"success": bool, "data": ..., "message": ...}
-    if resp["success"]: return resp["data"]
-    # network hiccups ("Failed to send an HTTP request", ECONNRESET, ...) are retried 3x
-    raise ZoweError(message + the command)
+def request(method, path, *, params=None, headers=None, body=None, json_body=None, timeout=180, retries=3):
+    sess, base = _session()               # one shared requests.Session: basic auth, then the LTPA cookie
+    r = sess.request(method, base + path, ...)  # connection errors retried (not for submit)
+    if r.status_code >= 400:
+        raise ZosError(z/OSMF "message" + "details", status, method, path)   # 401 -> "log on again"
+    oplog.write("EWS100I", f"{method} {path} {r.status_code}", ms)           # every call is logged
 ```
 
-* `--rfj` makes every command print a JSON envelope, so results are parsed, never screen-scraped.
-* Each step in the UI shows the error text of a failed call verbatim, including which command failed.
-* Calls have timeouts (3 min by default, 10 min for uploads/downloads, 15 min for a job submit that waits for output).
+* Every state-changing request sends `X-CSRF-ZOSMF-HEADER: true`, which z/OSMF requires.
+* A single shared session keeps the TLS connection pool and the LTPA token cookie that z/OSMF returns after the first basic-auth request, so later calls skip the password check.
+* A job submit is never retried: if the answer is lost, resending it could run the job twice.
 
-## 4. Every Zowe call the project makes
+### Every call the project makes
 
-| Purpose | Zowe CLI command | z/OSMF API underneath | Used by |
-|---|---|---|---|
-| Connection test, user ID | `zowe zosmf check status` | `GET /zosmf/info` | Test connection, status panel |
-| List data sets | `zowe zos-files list data-set "Z72230.EWS.**" -a` | `GET /zosmf/restfiles/ds?dslevel=` | Setup, status, Data sets page |
-| List members | `zowe zos-files list all-members Z72230.LOAD` | `GET /zosmf/restfiles/ds/{pds}/member` | Verify load modules, PDS browsing |
-| Create PDS-E library | `zowe zos-files create data-set-partitioned DSN --dst LIBRARY --rf FB --rl 80 --size 5TRK --db 20` | `POST /zosmf/restfiles/ds/{dsn}` | Setup |
-| Create load library | `zowe zos-files create data-set-binary DSN --dst LIBRARY --size 15TRK` | same | Setup (only if `Z72230.LOAD` is missing) |
-| Create sequential data set | `zowe zos-files create data-set-sequential DSN --rf FB --rl 100 --bs 27900 --size 15TRK` | same | Generate data, write-back |
-| Upload a member / data set | `zowe zos-files upload file-to-data-set local.txt "DSN(MEMBER)"` | `PUT /zosmf/restfiles/ds/{dsn}` (text, ASCII→EBCDIC) | Setup, generate data, write-back |
-| Download a data set | `zowe zos-files download data-set DSN -f local.txt --overwrite` | `GET /zosmf/restfiles/ds/{dsn}` (text, EBCDIC→ASCII) | After every batch |
-| View records | `zowe zos-files view data-set DSN --range 0,50` | `GET` with `X-IBM-Record-Range` | Data set preview |
-| Delete | `zowe zos-files delete data-set DSN -f` | `DELETE /zosmf/restfiles/ds/{dsn}` | Re-allocation, reset |
-| Submit JCL and wait | `zowe zos-jobs submit data-set "Z72230.EWS.JCL(EWSBATCH)" --js "ASOFDT=20260930 MODE=SCORE" --wfo` | `PUT /zosmf/restjobs/jobs` + polling | Every batch, compile, report |
-| Job status | `zowe zos-jobs view job-status-by-jobid JOB04556` | `GET /zosmf/restjobs/jobs/{name}/{id}` | Job output page |
-| Spool file list | `zowe zos-jobs list spool-files-by-jobid JOB04556` | `GET .../files` | Step RCs, job output page |
-| Spool content | `zowe zos-jobs view spool-file-by-id JOB04556 4` | `GET .../files/{id}/records` | Step RCs, job output page |
+| Purpose | Function | z/OSMF request |
+|---|---|---|
+| Heartbeat, system info | `ping()` | `GET /zosmf/info` (on this system it requires authentication) |
+| Logon check | `check_status()` | `GET /zosmf/info` + `GET /zosmf/restjobs/jobs?owner=USER&max-jobs=1` |
+| List data sets | `list_datasets("Z72230.EWS.**")` | `GET /zosmf/restfiles/ds?dslevel=...` with `X-IBM-Attributes: base` |
+| List members | `list_members(pds)` | `GET /zosmf/restfiles/ds/{pds}/member` |
+| Create PDS-E library | `create_library(dsn, "FB", 80)` | `POST /zosmf/restfiles/ds/{dsn}` `{"dsorg":"PO","dsntype":"LIBRARY","alcunit":"TRK",...}` |
+| Create sequential data set | `create_sequential(dsn, "FB", 100, "15TRK")` | same, `{"dsorg":"PS",...,"blksize":27900}` (half-track blocking) |
+| Upload text | `upload_file(local, "DSN(MEMBER)")` | `PUT /zosmf/restfiles/ds/{dsn}` with `X-IBM-Data-Type: text` (ASCII→EBCDIC) |
+| Download text | `download(dsn, local)` | `GET /zosmf/restfiles/ds/{dsn}` with `X-IBM-Data-Type: text` (EBCDIC→ASCII) |
+| View first records | `view(dsn, 50)` | same, with `X-IBM-Record-Range: 0,50` |
+| Delete | `delete(dsn)` | `DELETE /zosmf/restfiles/ds/{dsn}` |
+| Submit JCL | `submit("Z72230.EWS.JCL(EWSBATCH)", {"ASOFDT": 20260930, "MODE": "SCORE"})` | `PUT /zosmf/restjobs/jobs` `{"file": "//'Z72230.EWS.JCL(EWSBATCH)'"}` + one `X-IBM-JCL-Symbol-<name>` header per symbol |
+| Wait for the job | `wait_for_output(jobid)` | `GET /zosmf/restjobs/jobs/{name}/{id}` every 2 s until `status=OUTPUT` and a `retcode` |
+| Find a job by ID | (internal) | `GET /zosmf/restjobs/jobs?owner=*&jobid=JOB05387` |
+| Job list (TUI SDSF panel) | `list_jobs(owner, prefix)` | `GET /zosmf/restjobs/jobs?owner=&prefix=&max-jobs=` |
+| Spool files / content | `spool_files(jobid)`, `spool_content(jobid, id)` | `GET .../files`, `GET .../files/{id}/records` |
+| Purge job (TUI) | `delete_job(jobid)` | `DELETE /zosmf/restjobs/jobs/{name}/{id}` |
+
+Verified on the real system (2026-10-28): the RISKRPT download is byte-identical to the file Zowe CLI had downloaded, a 300-record round trip with special characters (`#@$ {}[]|!^~`) comes back unchanged, and `compile` (upload 12 members, submit EWSCOMP, step RCs, verify load modules) runs end to end.
 
 ### Passing parameters to JCL
 
-`--js` (`--jcl-symbols`) sends JCL symbols with the submit request; z/OSMF substitutes them in the JCL before conversion. Two details were verified on the real system:
+JCL symbols travel as request headers (`X-IBM-JCL-Symbol-ASOFDT: 20260930`). z/OSMF substitutes them before conversion. A `// SET` statement inside the JCL would **override** the submitted value, so `EWSBATCH` deliberately has none for these symbols. In the JCL they are used as `PARM='&ASOFDT.&MODE'` (COBOL receives `20260930SCORE`) and `PARM='%EWSRECON &ASOFDT &MODE'` (the REXX exec receives two words).
 
-1. Several symbols must be **space-separated** (`"ASOFDT=20260930 MODE=SCORE"`). A comma is taken as part of the value.
-2. A `// SET` statement inside the JCL **overrides** the submitted value, so `EWSBATCH` deliberately has no `SET` for these symbols.
+### Per-step return codes
 
-In the JCL the symbols are used as `PARM='&ASOFDT.&MODE'` (COBOL receives `20260930SCORE`) and `PARM='%EWSRECON &ASOFDT &MODE'` (the REXX exec receives two words).
-
-### Getting per-step return codes
-
-`--wfo` returns only the job's highest return code (e.g. `CC 0004`). To show the code of every step, the backend reads the job's `JESYSMSG` spool file and parses the standard system messages:
+The job status only has the highest return code (e.g. `CC 0004`). For every step's code, `step_results(jobid)` reads the job's `JESYSMSG` spool file and parses the standard messages:
 
 | Message | Meaning | Parsed to |
 |---|---|---|
@@ -93,25 +101,44 @@ In the JCL the symbols are used as `PARM='&ASOFDT.&MODE'` (COBOL receives `20260
 
 An action fails if any step exceeds its allowed RC (4 for EWSBATCH/EWSCOMP, 0 for EWSRPTJ), abended, or was skipped.
 
+## 4. Channel 2: SSH and the EWS agent (`pipeline/uss.py`, `mainframe/uss/ewsagent.py`)
+
+* One SSH connection per process, kept open with keepalives. Only connecting is serialized; each command runs on its own channel, so a long command in the TUI shell does not block the heartbeat.
+* Non-interactive SSH sessions do not read the login profile, so every command is prefixed with the environment ZOAU and Python need (`PATH`, `LIBPATH`, `_BPXK_AUTOCVT=ON`, `_CEE_RUNOPTS=FILETAG(AUTOCVT,AUTOTAG)`).
+* Authentication: an SSH key if the server accepts one, otherwise the keyring password.
+
+The **EWS agent** is our own program on the z/OS side: a Python 3.9 script (standard library plus the ZOAU commands), copied by SFTP to `~/ews/ewsagent.py` and tagged as ASCII text (`chtag -tc ISO8859-1`) so z/OS Python reads it. It answers in JSON:
+
+| Call | Answers with | How it gets it on z/OS |
+|---|---|---|
+| `ewsagent.py info` | system name, z/OS release, IPL date and volume, console clock, user, home file system, ZOAU/Python versions | `sysvar`, `uname`, `opercmd 'D IPLINFO'`, `opercmd 'D T'`, `df`, `zoaversion` |
+| `ewsagent.py jobs OWNER PREFIX` | JES jobs | `jls /OWNER/PREFIX` |
+| `ewsagent.py datasets PATTERN` | catalog entries | `dls -l` |
+| `ewsagent.py count DSN` | number of records (z/OSMF cannot count) | `dcat DSN \| wc -l` |
+
+One `info` call costs one SSH round trip (about 2 s, mostly z/OS process start-up).
+
 ## 5. Character encoding
 
-z/OS stores text in **EBCDIC** (code page IBM-1047). Zowe uploads and downloads in **text mode**, so z/OSMF converts each byte between ASCII and EBCDIC and splits/joins records at line ends:
+z/OS stores text in **EBCDIC** (code page IBM-1047). Both upload and download use z/OSMF **text mode**, so z/OSMF converts each byte between ASCII and EBCDIC and splits or joins records at line ends:
 
-* upload: each line of the local file becomes one fixed-length record (padded with blanks to the LRECL);
+* upload: each line of the local file becomes one fixed-length record, padded with blanks to the LRECL;
 * download: each record becomes one line (trailing blanks of FB records are kept; VB records have none).
 
-This only works if every byte is a character. Hence all numeric fields in files that cross the boundary are **zoned decimal** (digits as characters), with no signs and no packed or binary fields. `tests/test_layouts.py` checks that all mainframe sources are pure ASCII and fit their columns.
+This only works if every byte is a character. Hence all numeric fields in files that cross the boundary are **zoned decimal** (digits as characters), with no signs and no packed or binary fields. `tests/test_layouts.py` checks that all mainframe sources are pure ASCII and fit their columns. Sending an explicit `charset=ISO-8859-1` on uploads makes z/OSMF's iconv fail (`EDC5121I`), so the client sends plain `text/plain` and relies on the server's default conversion.
 
-## 6. Behaviour of the Z Xplore system that the code works around
+## 6. The operator log
+
+Every z/OSMF request, upload, download, job, SSH command, run step and channel change is written to the `oplog` table in SQLite, with a z/OS-style message ID (`EWS100I`, `EWS101E`, …), the channel and the duration. The web backend, the TUI and the CLI all write to it, and the TUI's SYSLOG panel shows it live. See [TUI.md](TUI.md#message-ids).
+
+## 7. Behaviour of the Z Xplore system that the code works around
 
 | Observed | Handling |
 |---|---|
-| Occasional `Failed to send an HTTP request` (connection reset) | `zowe.run` retries up to 3 times with back-off |
+| Occasional connection resets | `zos.request` retries idempotent calls up to 3 times with back-off (`EWS102W`) |
 | One COBOL source was always cut off during upload: the network filter in front of z/OSMF flags content that looks like SQL injection (`SELECT ...` together with literals such as `' HIGH=' ... ' LOW='`) | The `DISPLAY` text in `EWSRPT` was reworded; the upload error message explains this case if it ever happens again |
-| SMS rejects allocations in cylinders (`--size 2CYL` → "SMS or ACS services returned an error"), tracks work | All allocations, in the backend and in JCL `SPACE=`, use tracks |
-| The site `IGYWCL` compile procedure reads `&SYSUID..CBL(&SRC)` and links into `&SYSUID..LOAD(&SRC)`; its COBOL step has no `SYSLIB` | COBOL sources go to `Z72230.CBL`; `EWSCOMP` adds `//COBOL.SYSLIB DD DSN=&SYSUID..EWS.CPY` for the copybooks |
+| `/zosmf/info` needs authentication here (it is often public) | `ping()` uses the logged-on session |
+| SMS rejects allocations in cylinders, tracks work | All allocations, in the backend and in JCL `SPACE=`, use tracks |
+| The site `IGYWCL` compile procedure reads `&SYSUID..CBL(&SRC)` and links into `&SYSUID..LOAD(&SRC)`; its COBOL step has no `SYSLIB` | COBOL sources go to `Z72230.CBL`; `EWSCOMP` adds `//COBOL.SYSLIB DD DSN=&SYSUID..EWS.CPY` |
 | DFSORT on this system does not support `SUM FIELDS=NONE,XSUM` (`ICE172A`) | Duplicate removal uses ICETOOL `SELECT ... FIRST DISCARD(DUPS)` |
-
-## 7. Zowe Explorer
-
-Not needed to use the system. It shares the same `zosmf` profile, so everything the backend creates is visible there: add a filter `Z72230.EWS.*` in the Data Sets tree and `Owner Z72230, Prefix EWS*` in the Jobs tree. It is useful for editing COBOL with IBM Z Open Editor syntax checks.
+| `jls -o` means "output fields", not owner | The agent passes the owner in the mask: `jls /Z72230/*` |

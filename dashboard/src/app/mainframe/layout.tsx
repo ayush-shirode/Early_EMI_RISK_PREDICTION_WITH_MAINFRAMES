@@ -4,7 +4,7 @@ import { MainframeNav } from '@/components/MainframeNav';
 export default function MainframeLayout({ children }: { children: React.ReactNode }) {
   return (
     <PageShell title="Mainframe Control Center"
-      subtitle="Every action here runs on IBM z/OS through Zowe: the backend calls Zowe CLI, which talks to z/OSMF.">
+      subtitle="Every action here runs on IBM z/OS: the backend calls the z/OSMF REST API directly over HTTPS.">
       <MainframeNav />
       {children}
     </PageShell>

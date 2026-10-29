@@ -1,7 +1,7 @@
 """The actions behind the Mainframe Control Center buttons.
 
-Every action is a list of named steps; every mainframe operation in a step is a Zowe
-CLI call (pipeline/zowe.py). The browser can only start these actions, with validated
+Every action is a list of named steps; every mainframe operation in a step is a call
+to our z/OSMF REST client (pipeline/zos.py). The browser can only start these actions, with validated
 parameters; it can never send a command or a data set name of its own.
 """
 from __future__ import annotations
@@ -9,26 +9,25 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 from datetime import date
-from functools import lru_cache
 from pathlib import Path
 
 from ml.layouts import CUSTREC, LOANREC, REJREC, SCOREREC, TXNREC
-from pipeline import db, zowe
+from pipeline import db, zos, zosconf
 from pipeline.config import HLQ_ENV, INPUT_DIR, MAINFRAME_SRC, SCORE_ASOF, TRAIN_ASOFS, Names
 from pipeline.runner import ActionError, RunContext
 
 PROGRAMS = ["EWSVCUST", "EWSVLOAN", "EWSMATCH", "EWSRPT"]
 
 
-@lru_cache(maxsize=1)
 def hlq() -> str:
     if HLQ_ENV:
         return HLQ_ENV
-    user = zowe.check_status().get("user")
-    if not user:
-        raise ActionError("Could not determine the z/OS user ID from the Zowe profile; set EWS_HLQ")
-    return user
+    try:
+        return zosconf.load().user
+    except zosconf.NotConfigured as e:
+        raise ActionError(str(e)) from e
 
 
 def names() -> Names:
@@ -40,10 +39,10 @@ def submit_job(step, member: str, symbols: dict | None = None, max_rc: int = 4) 
     """Submit JCL member from EWS.JCL, wait, collect per-step RCs, fail on a bad step."""
     n = names()
     step.detail(f"Submitting {n.JCL}({member})" + (f" with {symbols}" if symbols else ""))
-    job = zowe.submit(f"{n.JCL}({member})", symbols)
+    job = zos.submit(f"{n.JCL}({member})", symbols)
     jobid = job["jobid"]
     step.data(jobid=jobid, jobname=job.get("jobname"), retcode=job.get("retcode"))
-    steps = zowe.step_results(jobid)
+    steps = zos.step_results(jobid)
     step.data(steps=steps)
     bad = [s for s in steps if s["status"] == "abended" or (s["rc"] is not None and s["rc"] > max_rc)]
     skipped = [s for s in steps if s["status"] == "not executed"]
@@ -73,6 +72,21 @@ def parse_rejects(text: str) -> list[dict]:
     return [REJREC.parse(l) for l in text.splitlines() if l.strip()]
 
 
+_RPT_LINE = re.compile(r"^ \s*(\d+)\s+(\S{8})\s+([\d.]+)\s+(HIGH|MEDIUM|LOW)\s+(\S+)\s+([\d,.]+)\s+(.*)$")
+
+
+def parse_riskrpt(lines: list[str]) -> list[dict]:
+    """Detail lines of the EWSRPT intervention list (RISKRPT)."""
+    rows = []
+    for ln in lines:
+        m = _RPT_LINE.match(ln)
+        if m:
+            rows.append({"rank": int(m.group(1)), "cust_id": m.group(2), "risk_pct": float(m.group(3)),
+                         "tier": m.group(4), "action": m.group(5),
+                         "total_emi": float(m.group(6).replace(",", "")), "top_factor": m.group(7).strip()})
+    return rows
+
+
 def load_master_data(cust_text: str, loan_text: str, txn_text: str) -> dict:
     custs = [CUSTREC.parse(l) for l in cust_text.splitlines() if l.strip()]
     loans = [LOANREC.parse(l) for l in loan_text.splitlines() if l.strip()]
@@ -99,10 +113,10 @@ def run_ewsbatch(ctx: RunContext, step, asof: int, mode: str, tag: str) -> dict:
     job = submit_job(step, "EWSBATCH", {"ASOFDT": asof, "MODE": mode})
     step.detail(f"EWSBATCH {job['jobid']} ended {job['retcode']}. Downloading results...")
     out = ctx.dir / tag
-    zowe.download(n.RUNCTL, out / "runctl.txt")
-    zowe.download(n.FEATCSV, out / "features.csv")
-    zowe.download(n.REJECTS, out / "rejects.txt")
-    zowe.download(n.EXCEPT, out / "exceptions.txt")
+    zos.download(n.RUNCTL, out / "runctl.txt")
+    zos.download(n.FEATCSV, out / "features.csv")
+    zos.download(n.REJECTS, out / "rejects.txt")
+    zos.download(n.EXCEPT, out / "exceptions.txt")
     runctl = parse_runctl((out / "runctl.txt").read_text())
     step.data(runctl=runctl)
     if runctl.get("STATUS") != "OK":
@@ -129,7 +143,7 @@ def validate_asof(asof) -> int:
 def test_connection(ctx: RunContext) -> None:
     ctx.plan(["Connect to z/OSMF"])
     with ctx.step("Connect to z/OSMF") as s:
-        info = zowe.check_status()
+        info = zos.check_status()
         s.data(**info)
         s.detail(f"Connected as {info['user']} to {info['system']} (z/OSMF {info['zosmf_version']})")
         ctx.summary = info
@@ -154,7 +168,7 @@ def _upload_sources(ctx: RunContext, kinds: list[str]) -> None:
             for i, f in enumerate(files, 1):
                 member = f.name.split(".")[0].upper()
                 s.detail(f"{i}/{len(files)}  {f.name} -> {lib['name']}({member})")
-                zowe.upload_file(f, f"{lib['name']}({member})")
+                zos.upload_file(f, f"{lib['name']}({member})")
             s.data(members=[f.name.split(".")[0].upper() for f in files], library=lib["name"])
             s.detail(f"{len(files)} members uploaded to {lib['name']}")
 
@@ -164,7 +178,7 @@ def _compile(ctx: RunContext) -> None:
     with ctx.step("Compile and link (EWSCOMP)") as s:
         submit_job(s, "EWSCOMP", max_rc=4)
     with ctx.step("Verify load modules") as s:
-        members = set(zowe.list_members(n.LOAD))
+        members = set(zos.list_members(n.LOAD))
         missing = [p for p in PROGRAMS if p not in members]
         if missing:
             raise ActionError(f"Load modules missing in {n.LOAD}: {', '.join(missing)}")
@@ -176,17 +190,17 @@ def setup(ctx: RunContext) -> None:
     ctx.plan(["Connect to z/OSMF", "Allocate libraries", *SOURCE_STEPS.values(),
               "Compile and link (EWSCOMP)", "Verify load modules"])
     with ctx.step("Connect to z/OSMF") as s:
-        info = zowe.check_status()
+        info = zos.check_status()
         s.detail(f"Connected as {info['user']} to {info['system']}")
     n = names()
     with ctx.step("Allocate libraries") as s:
         created, existing = [], []
         for lib in n.libraries():
-            if zowe.exists(lib["name"]):
+            if zos.exists(lib["name"]):
                 existing.append(lib["name"])
             else:
                 s.detail(f"Allocating {lib['name']}")
-                zowe.create_library(lib["name"], lib["recfm"], lib["lrecl"])
+                zos.create_library(lib["name"], lib["recfm"], lib["lrecl"])
                 created.append(lib["name"])
         s.data(created=created, existing=existing)
         s.detail(f"{len(created)} allocated, {len(existing)} already existed")
@@ -223,13 +237,13 @@ def generate_data(ctx: RunContext, customers: int = 1500, seed: int = 42) -> Non
                  f"{len(manifest['defects'])} deliberately bad records")
     with ctx.step("Allocate input data sets") as s:
         for i in inputs:
-            if zowe.exists(i["name"]):
-                zowe.delete(i["name"])
-            zowe.create_sequential(i["name"], "FB", i["lrecl"], i["size"])
+            if zos.exists(i["name"]):
+                zos.delete(i["name"])
+            zos.create_sequential(i["name"], "FB", i["lrecl"], i["size"])
         s.detail(", ".join(f"{i['name']} FB {i['lrecl']}" for i in inputs))
     for i in inputs:
         with ctx.step(f"Upload {i['name']}") as s:
-            zowe.upload_file(INPUT_DIR / i["file"], i["name"])
+            zos.upload_file(INPUT_DIR / i["file"], i["name"])
             s.detail(f"{manifest['records'][i['file']]} records uploaded")
     db.kv_set("data", {"customers": customers, "seed": seed, "records": manifest["records"],
                        "defects": len(manifest["defects"]), "generated_at": db.now()})
@@ -271,7 +285,7 @@ def run_batch(ctx: RunContext, asof: int = SCORE_ASOF) -> None:
         res = run_ewsbatch(ctx, s, asof, "SCORE", "score")
     with ctx.step("Load master data from the mainframe") as s:
         s.detail(f"Downloading {n.CUST_VALID}, {n.LOAN_VALID}, {n.TXN_SRT}")
-        texts = [zowe.download(dsn, ctx.dir / "master" / f"{dsn.split('.', 2)[2].lower()}.txt").read_text()
+        texts = [zos.download(dsn, ctx.dir / "master" / f"{dsn.split('.', 2)[2].lower()}.txt").read_text()
                  for dsn in (n.CUST_VALID, n.LOAN_VALID, n.TXN_SRT)]
         counts = load_master_data(*texts)
         s.data(**counts)
@@ -284,15 +298,15 @@ def run_batch(ctx: RunContext, asof: int = SCORE_ASOF) -> None:
     with ctx.step("Write scores back (EWS.SCORES)") as s:
         local = ctx.dir / "scores.txt"
         local.write_text("\n".join(result["score_records"]) + "\n")
-        if zowe.exists(n.SCORES):
-            zowe.delete(n.SCORES)
-        zowe.create_sequential(n.SCORES, "FB", 80, "15TRK")
-        zowe.upload_file(local, n.SCORES)
+        if zos.exists(n.SCORES):
+            zos.delete(n.SCORES)
+        zos.create_sequential(n.SCORES, "FB", 80, "15TRK")
+        zos.upload_file(local, n.SCORES)
         s.detail(f"{len(result['score_records'])} SCOREREC records uploaded to {n.SCORES}")
     with ctx.step("Submit EWSRPTJ (intervention report)") as s:
         rpt = submit_job(s, "EWSRPTJ", max_rc=0)
     with ctx.step("Download report (EWS.RISKRPT)") as s:
-        zowe.download(n.RISKRPT, ctx.dir / "riskrpt.txt")
+        zos.download(n.RISKRPT, ctx.dir / "riskrpt.txt")
         s.detail(f"Report downloaded ({len((ctx.dir / 'riskrpt.txt').read_text().splitlines())} lines)")
     ctx.summary = {"asof": asof, "batch_job": res["job"]["jobid"], "report_job": rpt["jobid"],
                    "runctl": res["runctl"], "tiers": result["tiers"], "scored": result["scored"]}
@@ -307,9 +321,9 @@ def reset_data(ctx: RunContext, confirm: bool = False) -> None:
     with ctx.step("Delete EWS data sets") as s:
         keep = {n.JCL, n.CPY, n.CNTL, n.REXX}
         removed = []
-        for d in zowe.list_datasets(f"{n.hlq}.EWS.**"):
+        for d in zos.list_datasets(f"{n.hlq}.EWS.**"):
             if d["dsname"] not in keep:
-                zowe.delete(d["dsname"])
+                zos.delete(d["dsname"])
                 removed.append(d["dsname"])
         s.data(deleted=removed)
         s.detail(f"Deleted {len(removed)} data sets (libraries kept)")
@@ -335,11 +349,11 @@ def read_features_csv(path: Path) -> list[dict]:
 
 def mainframe_status() -> dict:
     """Live setup checklist (several Zowe calls; the API caches it)."""
-    info = zowe.check_status()
+    info = zos.check_status()
     n = names()
-    dsns = {d["dsname"]: d for d in zowe.list_datasets(f"{n.hlq}.EWS.**")}
+    dsns = {d["dsname"]: d for d in zos.list_datasets(f"{n.hlq}.EWS.**")}
     libs = [l["name"] for l in n.libraries() if l["name"] not in (n.CBL, n.LOAD)]
-    load = set(zowe.list_members(n.LOAD)) if zowe.exists(n.LOAD) else set()
+    load = set(zos.list_members(n.LOAD)) if zos.exists(n.LOAD) else set()
     return {
         "connection": info,
         "hlq": n.hlq,
@@ -351,7 +365,7 @@ def mainframe_status() -> dict:
 
 
 def dataset_info(dsn: str) -> dict:
-    items = zowe.list_datasets(dsn)
+    items = zos.list_datasets(dsn)
     return next((d for d in items if d["dsname"] == dsn), {})
 
 

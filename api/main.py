@@ -2,7 +2,7 @@
 
 Two groups of endpoints:
   * Mainframe Control Center: start whitelisted actions, follow runs, read job output,
-    browse project data sets and reports. All mainframe access goes through Zowe CLI.
+    browse project data sets and reports. All mainframe access goes through pipeline/zos.py.
   * Risk views: scored customers, SHAP explanations, history and what-if re-scoring,
     served from the local SQLite copy of the last batch run.
 
@@ -24,7 +24,7 @@ from fastapi.responses import PlainTextResponse
 
 from ml import features_meta as meta
 from ml import score
-from pipeline import actions, db, runner, zowe
+from pipeline import actions, db, runner, zos
 from pipeline.config import RUNS_DIR, TIER_HIGH, TIER_MEDIUM
 
 
@@ -131,9 +131,9 @@ def job_spool(jobid: str) -> dict:
     if not JOBID.match(jobid):
         raise HTTPException(400, "Invalid job ID")
     try:
-        files = zowe.spool_files(jobid)
-        status = zowe.job_status(jobid)
-    except zowe.ZoweError as e:
+        files = zos.spool_files(jobid)
+        status = zos.job_status(jobid)
+    except zos.ZosError as e:
         raise HTTPException(502, str(e))
     return {
         "job": {k: status.get(k) for k in ("jobname", "jobid", "owner", "status", "retcode", "class")},
@@ -146,8 +146,8 @@ def job_spool_file(jobid: str, file_id: int) -> str:
     if not JOBID.match(jobid):
         raise HTTPException(400, "Invalid job ID")
     try:
-        return zowe.spool_content(jobid, file_id)
-    except zowe.ZoweError as e:
+        return zos.spool_content(jobid, file_id)
+    except zos.ZosError as e:
         raise HTTPException(502, str(e))
 
 
@@ -155,8 +155,8 @@ def job_spool_file(jobid: str, file_id: int) -> str:
 def datasets() -> list[dict]:
     try:
         n = actions.names()
-        items = zowe.list_datasets(f"{n.hlq}.EWS.**")
-    except zowe.ZoweError as e:
+        items = zos.list_datasets(f"{n.hlq}.EWS.**")
+    except zos.ZosError as e:
         raise HTTPException(502, str(e))
     keys = ("dsname", "dsorg", "recfm", "lrecl", "blksz", "used", "sizex", "spacu", "cdate", "rdate", "vol")
     return [{k: d.get(k) for k in keys} for d in items]
@@ -171,10 +171,10 @@ def dataset_preview(dsn: str, records: int = 50) -> dict:
     if not re.fullmatch(r"[A-Z0-9#@$.]+", base) or not n.is_project_dataset(base):
         raise HTTPException(403, "Only the project's EWS data sets can be browsed")
     try:
-        if not member and next((d for d in zowe.list_datasets(dsn) if d["dsname"] == dsn), {}).get("dsorg", "").startswith("PO"):
-            return {"dsname": dsn, "members": zowe.list_members(dsn)}
-        text = zowe.view(dsn, max_records=min(max(records, 1), 500))
-    except zowe.ZoweError as e:
+        if not member and next((d for d in zos.list_datasets(dsn) if d["dsname"] == dsn), {}).get("dsorg", "").startswith("PO"):
+            return {"dsname": dsn, "members": zos.list_members(dsn)}
+        text = zos.view(dsn, max_records=min(max(records, 1), 500))
+    except zos.ZosError as e:
         raise HTTPException(502, str(e))
     return {"dsname": dsn, "lines": text.splitlines()}
 
@@ -206,14 +206,7 @@ def report(kind: str, runId: int | None = None) -> dict:
         if not p.exists():
             raise HTTPException(404, "No report in this run")
         lines = p.read_text().splitlines()
-        rows = []
-        for ln in lines:
-            m = re.match(r"^ \s*(\d+)\s+(\S{8})\s+([\d.]+)\s+(HIGH|MEDIUM|LOW)\s+(\S+)\s+([\d,.]+)\s+(.*)$", ln)
-            if m:
-                rows.append({"rank": int(m.group(1)), "cust_id": m.group(2), "risk_pct": float(m.group(3)),
-                             "tier": m.group(4), "action": m.group(5),
-                             "total_emi": float(m.group(6).replace(",", "")), "top_factor": m.group(7).strip()})
-        return {"runId": rid, "lines": lines, "rows": rows}
+        return {"runId": rid, "lines": lines, "rows": actions.parse_riskrpt(lines)}
     raise HTTPException(404, "Unknown report")
 
 

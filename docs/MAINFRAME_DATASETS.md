@@ -219,7 +219,7 @@ SCORES    CUST01662026093008811HIGH  INTVSPEND-TO-INCOME (3 M)         001331241
 ## 6. Who reads and writes what
 
 ```
-                    upload (Zowe)                                     download (Zowe)
+                    upload (z/OSMF)                                   download (z/OSMF)
 local generator ──► CUSTMAST LOANMAST REPAYHST TXNSUMM
                         │        │        │        │
                    ICETOOL  DFSORT   DFSORT   DFSORT
@@ -235,6 +235,6 @@ local generator ──► CUSTMAST LOANMAST REPAYHST TXNSUMM
                                           │                                       │
                        CTLTOT ──► REXX EWSRECON ─► RUNCTL ──────────────────────► gate (STATUS=OK)
                                                                                   ▼
-                                    RISKRPT ◄── EWSRPT ◄── DFSORT ◄── SCORES ◄─── upload (Zowe)
+                                    RISKRPT ◄── EWSRPT ◄── DFSORT ◄── SCORES ◄─── upload (z/OSMF)
                                        └──────────────────────────────────────────► UI Reports
 ```

@@ -1,0 +1,280 @@
+/* 3270 terminal look: black screen, green/turquoise/white/yellow/red, no rounded chrome. */
+$green: #3ce65a;
+$turq: #40e0d0;
+$white: #f2f2f2;
+$yellow: #ffff55;
+$red: #ff5555;
+$blue: #6f8fff;
+$pink: #ff79c6;
+$dim: #2a6b3a;
+
+Screen {
+    background: black;
+    color: $green;
+    layers: base overlay;
+}
+
+#title {
+    height: 1;
+    color: $white;
+    text-style: bold;
+}
+
+#cmdrow {
+    height: 1;
+}
+
+.label {
+    width: auto;
+    color: $turq;
+}
+
+#cmd {
+    width: 1fr;
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: black;
+    color: $white;
+    text-style: underline;
+}
+
+#cmd:focus {
+    border: none;
+    background: #0b1f10;
+}
+
+#scroll {
+    width: auto;
+    color: $turq;
+}
+
+#msgline {
+    height: 1;
+    color: $yellow;
+}
+
+#body {
+    height: 1fr;
+}
+
+#pfkeys {
+    height: 1;
+    color: $turq;
+}
+
+#statusline {
+    height: 1;
+    background: #0b1f10;
+    color: $green;
+}
+
+.section {
+    color: $white;
+    text-style: bold;
+    height: 1;
+    margin-top: 1;
+}
+
+.box {
+    border: ascii $dim;
+    border-title-color: $white;
+    border-title-style: bold;
+    padding: 0 1;
+    height: auto;
+}
+
+.dim {
+    color: $dim;
+}
+
+DataTable {
+    background: black;
+    color: $green;
+    scrollbar-size: 1 1;
+    scrollbar-color: $dim;
+    scrollbar-background: black;
+    height: auto;
+    max-height: 100%;
+}
+
+DataTable > .datatable--header {
+    background: black;
+    color: $turq;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: $green;
+    color: black;
+    text-style: bold;
+}
+
+DataTable:blur > .datatable--cursor {
+    background: $dim;
+    color: $white;
+}
+
+DataTable > .datatable--hover {
+    background: #102818;
+}
+
+RichLog {
+    background: black;
+    color: $green;
+    scrollbar-size: 1 1;
+    scrollbar-color: $dim;
+    scrollbar-background: black;
+}
+
+VerticalScroll, ScrollableContainer {
+    scrollbar-size: 1 1;
+    scrollbar-color: $dim;
+    scrollbar-background: black;
+}
+
+Sparkline {
+    height: 3;
+    margin: 0 0 1 0;
+}
+
+Sparkline > .sparkline--max-color {
+    color: $yellow;
+}
+
+Sparkline > .sparkline--min-color {
+    color: $green;
+}
+
+/* ---------------------------------------------------------- primary menu */
+#menu-wrap {
+    height: auto;
+}
+
+#menu {
+    width: 1fr;
+    height: auto;
+}
+
+#sysinfo {
+    width: 46;
+    height: auto;
+}
+
+#banner {
+    color: $turq;
+    height: auto;
+    margin: 1 0;
+}
+
+/* ---------------------------------------------------------- logon */
+#logon {
+    width: 80;
+    height: auto;
+    padding: 1 2;
+}
+
+.field {
+    height: 1;
+    margin-bottom: 1;
+}
+
+.field .label {
+    width: 18;
+}
+
+.field Input {
+    width: 40;
+    height: 1;
+    border: none;
+    padding: 0 1;
+    background: #0b1f10;
+    color: $white;
+    text-style: underline;
+}
+
+.field Input:focus {
+    border: none;
+    background: #164024;
+}
+
+/* ---------------------------------------------------------- connection */
+.channel {
+    width: 1fr;
+    height: auto;
+}
+
+#conn-top {
+    height: auto;
+}
+
+/* ---------------------------------------------------------- browse */
+#ruler {
+    height: 1;
+    color: $turq;
+}
+
+#browse {
+    height: 1fr;
+}
+
+#browse-text {
+    width: auto;
+}
+
+/* ---------------------------------------------------------- pipeline */
+#pipe-top {
+    height: 14;
+}
+
+#actions-box {
+    width: 68;
+}
+
+#pactions, #runs {
+    overflow-x: hidden;
+}
+
+#runs-box {
+    width: 1fr;
+}
+
+#flow {
+    height: auto;
+}
+
+#steps-box {
+    height: 1fr;
+}
+
+/* ---------------------------------------------------------- reports */
+#rpt-top {
+    height: auto;
+    max-height: 18;
+}
+
+/* ---------------------------------------------------------- modals */
+ModalScreen {
+    align: center middle;
+    background: black 60%;
+}
+
+#dialog {
+    width: 84;
+    height: auto;
+    max-height: 90%;
+    border: double $turq;
+    border-title-color: $white;
+    border-title-style: bold;
+    background: black;
+    padding: 1 2;
+}
+
+#dialog .hint {
+    color: $turq;
+    margin-top: 1;
+}
+
+#dialog .warn {
+    color: $yellow;
+}

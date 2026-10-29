@@ -1,18 +1,21 @@
 """Background executor for UI actions.
 
-One action runs at a time (the mainframe data sets are shared). Each action declares
-its steps up front so the UI can draw the full timeline immediately; every step's
-status, timing, detail text and data (job IDs, return codes, counts) is persisted.
+One action runs at a time (the mainframe data sets are shared), across processes: the
+web backend, the operator TUI and the CLI all check the runs table before starting, and
+a run whose process has died no longer blocks anyone. Each action declares its steps up
+front so the UI can draw the full timeline immediately; every step's status, timing,
+detail text and data (job IDs, return codes, counts) is persisted.
 """
 from __future__ import annotations
 
 import json
+import os
 import threading
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
 
-from pipeline import db
+from pipeline import db, oplog
 from pipeline.config import RUNS_DIR
 
 
@@ -62,8 +65,11 @@ class RunContext:
             yield handle
         except Exception as e:
             handle.finish("failed", str(e))
+            oplog.write("EWS202E", f"RUN #{self.run_id} STEP {seq + 1} {name.upper()} FAILED: {e}", channel="RUN")
             raise
         handle.finish("ok")
+        oplog.write("EWS201I", f"RUN #{self.run_id} STEP {seq + 1} {name.upper()} OK"
+                    + (f" - {handle._detail}" if handle._detail else ""), channel="RUN")
 
 
 class StepHandle:
@@ -98,34 +104,42 @@ class StepHandle:
         self._save(status, finished=True)
 
 
-_active: dict = {"run_id": None}
 _guard = threading.Lock()
 
 
 def active_run_id() -> int | None:
-    return _active["run_id"]
+    """The run in progress in any process (backend, TUI, CLI), if any."""
+    for r in db.query("SELECT id, pid FROM runs WHERE status='running' ORDER BY id DESC"):
+        if db.pid_alive(r["pid"]):
+            return r["id"]
+    return None
 
 
-def start(action: str, fn, params: dict) -> int:
-    with _guard:
-        if _active["run_id"] is not None:
-            raise Busy(f"Run #{_active['run_id']} is still active")
-        with db.tx() as con:
-            cur = con.execute("INSERT INTO runs(action, params, status, started_at) VALUES(?,?, 'running', ?)",
-                              (action, json.dumps(params), db.now()))
-            run_id = cur.lastrowid
-        _active["run_id"] = run_id
+def _claim(action: str, params: dict, source: str) -> int:
+    """Insert the run if no other live run exists. BEGIN IMMEDIATE makes check + insert atomic across processes."""
+    with _guard, db.tx() as con:
+        con.execute("BEGIN IMMEDIATE")
+        db.fail_orphaned_runs(con)
+        busy = con.execute("SELECT id, source FROM runs WHERE status='running' ORDER BY id DESC").fetchone()
+        if busy:
+            raise Busy(f"Run #{busy['id']} is still active" + (f" (started from the {busy['source']})" if busy["source"] else ""))
+        cur = con.execute("INSERT INTO runs(action, params, status, started_at, pid, source) VALUES(?,?, 'running', ?,?,?)",
+                          (action, json.dumps(params), db.now(), os.getpid(), source))
+        run_id = cur.lastrowid
+    oplog.write("EWS200I", f"RUN #{run_id} {action.upper()} STARTED FROM {source}"
+                + (f" {json.dumps(params)}" if params else ""), channel="RUN")
+    return run_id
+
+
+def start(action: str, fn, params: dict, source: str = "API") -> int:
+    run_id = _claim(action, params, source)
     threading.Thread(target=_execute, args=(run_id, fn, params), daemon=True, name=f"run-{run_id}").start()
     return run_id
 
 
-def run_inline(action: str, fn, params: dict) -> int:
+def run_inline(action: str, fn, params: dict, source: str = "CLI") -> int:
     """Same as start() but in the calling thread (used by the debugging CLI)."""
-    with db.tx() as con:
-        cur = con.execute("INSERT INTO runs(action, params, status, started_at) VALUES(?,?, 'running', ?)",
-                          (action, json.dumps(params), db.now()))
-        run_id = cur.lastrowid
-    _active["run_id"] = run_id
+    run_id = _claim(action, params, source)
     _execute(run_id, fn, params)
     return run_id
 
@@ -144,7 +158,10 @@ def _execute(run_id: int, fn, params: dict) -> None:
             con.execute("UPDATE run_steps SET status='skipped' WHERE run_id=? AND status='pending'", (run_id,))
             con.execute("UPDATE runs SET status=?, error=?, finished_at=?, summary=? WHERE id=?",
                         (status, error, db.now(), json.dumps(ctx.summary, default=str), run_id))
-        _active["run_id"] = None
+        if status == "ok":
+            oplog.write("EWS203I", f"RUN #{run_id} ENDED OK", channel="RUN")
+        else:
+            oplog.write("EWS204E", f"RUN #{run_id} FAILED: {error}", channel="RUN")
 
 
 def get_run(run_id: int) -> dict | None:
@@ -162,7 +179,7 @@ def get_run(run_id: int) -> dict | None:
 
 
 def list_runs(limit: int = 50, action: str | None = None) -> list[dict]:
-    sql = "SELECT id, action, params, status, started_at, finished_at, error FROM runs"
+    sql = "SELECT id, action, params, status, started_at, finished_at, error, source FROM runs"
     args: tuple = ()
     if action:
         sql += " WHERE action=?"
