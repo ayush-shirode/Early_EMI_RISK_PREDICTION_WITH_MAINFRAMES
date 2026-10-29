@@ -55,6 +55,9 @@ class Names:
         # write-back
         self.SCORES = f"{e}.SCORES"
         self.RISKRPT = f"{e}.RISKRPT"
+        # VSAM KSDS, key = customer ID: rebuilt by EWSBATCH / updated in place by EWSSUPD
+        self.CUSTKSDS = f"{e}.CUSTKSDS"
+        self.SCORKSDS = f"{e}.SCORKSDS"
 
     def libraries(self) -> list[dict]:
         """PDS-E libraries that setup allocates when missing."""

@@ -12,14 +12,14 @@ This folder documents what was built in `CP/`, how its parts connect, and how to
 | [BACKEND_AND_DATABASE.md](BACKEND_AND_DATABASE.md) | The FastAPI backend, the action runner, the local SQLite database and the full API reference |
 | [FRONTEND.md](FRONTEND.md) | The Next.js dashboard: pages, what each shows, which API it calls |
 | [TUI.md](TUI.md) | The operator console: 3270-style terminal UI, every panel, commands, message IDs |
-| [TUI_DEMO.md](TUI_DEMO.md) | **Operator console demo**: the 9 options in one line each, and a step-by-step demo script |
+| [TUI_DEMO.md](TUI_DEMO.md) | **Operator console demo**: the 10 options in one line each, and a step-by-step demo script |
 | [DEMO.md](DEMO.md) | **Step-by-step demo**: preparation, a timed click-by-click script with talking points, expected results, fallback plan, likely questions |
 | [OPERATIONS.md](OPERATIONS.md) | Install, run, test, troubleshooting, security |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | The original plan, with notes on where the implementation differs |
 
 ## In one paragraph
 
-Customer, loan, repayment and account data live on **IBM z/OS** (IBM Z Xplore) as **sequential data sets** in fixed-width EBCDIC records described by **COBOL copybooks**. A **JCL batch job** sorts and checks them with **DFSORT/ICETOOL**, validates them with **COBOL**, matches all four files and computes 26 early-warning features with a **COBOL balanced-line match**, converts the result to CSV with **DFSORT**, and reconciles every record count with **REXX**. A **Python** backend drives all of this through its own client for the **z/OSMF REST API**, downloads the features, scores every customer with an **XGBoost** model, explains each score with **SHAP**, writes the scores **back to the mainframe**, and runs a second COBOL job that prints the **early intervention list** on z/OS. A **Next.js** dashboard serves bank staff (every mainframe step is a button there), and a 3270-style **operator console** in the terminal monitors the z/OSMF and SSH connections and runs the same steps.
+Customer, loan, repayment and account data live on **IBM z/OS** (IBM Z Xplore) as **sequential data sets** in fixed-width EBCDIC records described by **COBOL copybooks**. A **JCL batch job** sorts and checks them with **DFSORT/ICETOOL**, validates them with **COBOL**, matches all four files and computes 26 early-warning features with a **COBOL balanced-line match**, converts the result to CSV with **DFSORT**, loads the valid customers into a **VSAM KSDS** with **IDCAMS**, and reconciles every record count with **REXX** (including the KSDS, from `LISTCAT`). A **Python** backend drives all of this through its own client for the **z/OSMF REST API**, downloads the features, scores every customer with an **XGBoost** model, explains each score with **SHAP**, writes the scores **back to the mainframe**, where a COBOL program keeps each customer's latest and previous score in a second **VSAM KSDS** (keyed `READ`/`REWRITE`), and runs a COBOL job that prints the **early intervention list** on z/OS with names read by key from VSAM. A **Next.js** dashboard serves bank staff (every mainframe step is a button there), and a 3270-style **operator console** in the terminal monitors the z/OSMF and SSH connections and runs the same steps.
 
 ## Quick start
 
@@ -35,9 +35,10 @@ Open http://localhost:3000/mainframe and follow the five-step checklist (connect
 
 | Check | Result |
 |---|---|
-| Compile of all 4 COBOL programs (Enterprise COBOL 6.5) | CC 0000 |
+| Compile of all 5 COBOL programs (Enterprise COBOL 6.5) | CC 0000 |
 | EWSBATCH on 1,500 customers / 77,243 records | CC 0004 (expected: deliberately bad records rejected), all 7 REXX balancing checks OK |
 | Mainframe features vs Python reference rules | identical on all 28 fields for every customer (`tests/test_mainframe_golden.py`) |
 | Model on held-out snapshot (2026-06-30) | ROC-AUC 0.825, PR-AUC 0.537, High-tier precision 74% (base rate 10.6%) |
 | Full scoring run from the browser | ~70 s: batch, download, score 1,023 customers, write back, COBOL report |
-| Automated tests | 31 passed |
+| VSAM (2026-10-29) | CUSTKSDS 1,475 records, `CHK_VSAM=OK`; SCORKSDS loaded with 1,054 on the first run, 1,023 updated in place on the next (49 changed tier); 1,023 names read by key |
+| Automated tests | 45 passed (incl. the mainframe golden test) |

@@ -2,7 +2,7 @@
 
 Predicts which borrowers are likely to run into EMI repayment stress in the next 90 days, **before** a payment is missed, and explains why.
 
-* **Mainframe (IBM z/OS via z/OSMF and SSH):** the data lives in z/OS data sets. A JCL batch job sorts and checks it with DFSORT/ICETOOL, validates it with COBOL, matches all files and computes the early-warning features with COBOL, converts them to CSV with DFSORT, and reconciles every record count with REXX. Scores are written back and a COBOL job prints the early intervention list.
+* **Mainframe (IBM z/OS via z/OSMF and SSH):** the data lives in z/OS data sets. A JCL batch job sorts and checks it with DFSORT/ICETOOL, validates it with COBOL, matches all files and computes the early-warning features with COBOL, converts them to CSV with DFSORT, and reconciles every record count with REXX. IDCAMS loads the valid customers into a VSAM KSDS; scores are written back, a COBOL program updates a score KSDS in place by key, and a COBOL job prints the early intervention list with names read by key from VSAM.
 * **ML (Python):** XGBoost classifier, time-based evaluation, SHAP explanation for every customer.
 * **Dashboard (Next.js):** for bank staff. Every mainframe step (setup, upload, compile, batch, job output, reports, training) is a button; the risk pages show the scored customers.
 * **Operator console (terminal):** for the mainframe operator. ISPF/SDSF-style panels to monitor both connections, browse/upload/download data sets, follow jobs and the batch pipeline, read the operator log and run USS, TSO and console commands.

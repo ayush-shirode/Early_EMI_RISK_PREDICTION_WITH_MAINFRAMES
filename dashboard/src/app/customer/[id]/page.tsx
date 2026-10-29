@@ -5,6 +5,7 @@ import { PageShell, Loading } from '@/components/PageShell';
 import { RiskGauge } from '@/components/RiskGauge';
 import { SpendTrendChart } from '@/components/SpendTrendChart';
 import { SuggestionCards } from '@/components/SuggestionCards';
+import { VsamCard } from '@/components/VsamCard';
 import { useCustomer } from '@/context/CustomerContext';
 import { getSeverityColor } from '@/lib/customers';
 import { api, fmtAsOf, inr } from '@/lib/api';
@@ -163,6 +164,7 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
           <div className="space-y-4">
             <SpendTrendChart data={c.spendTrend} emiAmount={c.emiAmount} />
             <SuggestionCards suggestions={c.suggestions} severity={c.severity} />
+            <VsamCard custId={c.id} />
           </div>
         </div>
 

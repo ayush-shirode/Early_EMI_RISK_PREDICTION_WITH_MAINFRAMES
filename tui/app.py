@@ -19,12 +19,13 @@ from pipeline import db, runner, uss, zos, zosconf
 from tui.monitor import Monitor
 from tui.panels import DIM, GREEN, RED, STATE_COLOR, TURQ, WHITE, YELLOW, ConfirmDialog, Panel
 from tui.screens import (OPTIONS, ConnScreen, DslistScreen, LogonScreen, MainMenu, PipelineScreen, ReportsScreen,
-                         SdsfScreen, ShellScreen, SyslogScreen)
+                         SdsfScreen, ShellScreen, SyslogScreen, VsamScreen)
 
 SCREENS = {"0": LogonScreen, "1": ConnScreen, "2": DslistScreen, "3": SdsfScreen, "4": PipelineScreen,
-           "5": SyslogScreen, "6": ShellScreen, "7": ReportsScreen}
+           "5": SyslogScreen, "6": ShellScreen, "7": ReportsScreen, "8": VsamScreen}
 NAMES = {name: key for key, name, _ in OPTIONS} | {"LOG": "5", "ST": "3", "PIPE": "4", "CMD": "6", "CONN": "1",
-                                                   "DS": "2", "RPT": "7", "LOGON": "0"}
+                                                   "DS": "2", "RPT": "7", "LOGON": "0",
+                                                   "KSDS": "8"}
 
 
 class EwsConsole(App):

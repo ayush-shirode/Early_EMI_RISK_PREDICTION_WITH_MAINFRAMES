@@ -210,6 +210,15 @@ def report(kind: str, runId: int | None = None) -> dict:
     raise HTTPException(404, "Unknown report")
 
 
+@app.get("/vsam")
+def vsam() -> list[dict]:
+    """LISTCAT statistics of the VSAM KSDS clusters (records, inserts, updates, splits, volume)."""
+    try:
+        return actions.vsam_clusters()
+    except zos.ZosError as e:
+        raise HTTPException(502, str(e))
+
+
 @app.get("/model")
 def model() -> dict:
     m = score.metrics()
@@ -356,6 +365,20 @@ def explanation(cust_id: str, top: int = 10) -> dict:
         "modelVersion": p["model_version"], "computedAt": p["created_at"],
         "features_raw": json.loads(p["features"]),
     }
+
+
+@app.get("/customers/{cust_id}/vsam")
+def customer_vsam(cust_id: str) -> dict:
+    """The customer's records read by key from the VSAM KSDS on z/OS, live (not from SQLite)."""
+    try:
+        r = actions.vsam_customer(cust_id)
+    except runner.ActionError as e:
+        raise HTTPException(400, str(e))
+    except zos.ZosError as e:
+        raise HTTPException(502, str(e))
+    if not r["customer"] and not r["score"]:
+        raise HTTPException(404, f"{cust_id.upper()} is in neither VSAM cluster")
+    return r
 
 
 @app.get("/customers/{cust_id}/history")

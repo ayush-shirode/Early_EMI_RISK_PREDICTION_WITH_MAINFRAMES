@@ -1,6 +1,6 @@
 # Operator Console (TUI): Options and Demo Flow
 
-## The 9 options at a glance
+## The 10 options at a glance
 
 | Opt | Name | One-liner |
 |---|---|---|
@@ -12,13 +12,14 @@
 | **5** | SYSLOG | Live operator log of every mainframe call, job, run step, connection change and error. |
 | **6** | COMMAND | Runs real commands on z/OS over SSH: a UNIX shell, TSO commands and operator console commands. |
 | **7** | REPORTS | Results of the last batch run: REXX reconciliation, rejected records, and the COBOL early intervention list. |
+| **8** | VSAM | The two VSAM KSDS clusters: their catalog statistics, and any customer read by key with their latest and previous score. |
 | **X** | EXIT | Leaves the console (it asks first if a run started here is still active). |
 
 ## Keys you will use
 
 | Key / input | Does |
 |---|---|
-| `0`–`7` or Enter (on the menu) | open an option |
+| `0`–`8` or Enter (on the menu) | open an option |
 | `=N` on any panel's command line | jump straight to option N |
 | `F3` or `Esc` | go back one panel |
 | `F5` | refresh |
@@ -37,11 +38,11 @@
 
 ---
 
-## Demo flow (about 10 minutes)
+## Demo flow (about 11 minutes)
 
 ### Step 1: Start the console and show the primary menu (0:00)
 - **Do:** run `make tui`. The **EWSPRIM** primary option menu opens.
-- **Show:** the EWS banner, the 9 options, and the system box on the right (user ID, system S0W1, z/OS level, model, last run).
+- **Show:** the EWS banner, the 10 options, and the system box on the right (user ID, system S0W1, z/OS level, model, last run).
 - **Say:** *"This is the operator's view of the mainframe side, built to look and work like a real 3270 ISPF session."*
 
 ### Step 2: Show the status line (0:30)
@@ -99,11 +100,23 @@
 - **Show:**
   - **RECONCILIATION:** every `CHK_…` check `OK` and `STATUS OK`.
   - **REJECTS AND EXCEPTIONS:** bad records caught, by reason code (C02 age not numeric, L05 tenure, M02 orphan repayment…).
-  - **EARLY INTERVENTION LIST:** the riskiest customers, with risk %, tier and top risk factor.
+  - **EARLY INTERVENTION LIST:** the riskiest customers, with risk %, tier, top risk factor and name. The COBOL program read each name by key from VSAM.
 - **Say:** *"The batch refuses to score unless every count balances, and the final list is printed by a COBOL program on z/OS from the model's scores."*
 - **Do:** type `RPT`. This opens the full 133-column COBOL report. Press `F3`.
 
-### Step 9: Option 6, COMMAND (7:30)
+### Step 9: Option 8, VSAM (7:30)
+- **Do:** type `=8`.
+- **Show:** the two clusters and their LISTCAT statistics. `CUSTKSDS` has 1,475 records; `SCORKSDS` has about 1,054 records, and its **UPDATED** column counts in-place updates.
+- **Say:** *"The batch uses sequential files because it reads everything. For one customer at a time we use VSAM KSDS clusters, indexed by customer ID."*
+- **Do:** type `CUST0166`.
+- **Show:**
+  - **The customer record** from `CUSTKSDS`.
+  - **The score record** from `SCORKSDS`: latest probability, the **previous** score from the earlier run, the change in points, and **TIMES SCORED**.
+  - **The raw 100-byte records**, with the key highlighted under the column ruler.
+- **Say:** *"COBOL program EWSSUPD reads this record by key on every scoring run, moves the old score to 'previous' and rewrites it in place. No file is rewritten."*
+- **Do (optional):** press `Tab`, then `B` on a cluster to browse its records in key order. Press `F3`.
+
+### Step 10: Option 6, COMMAND (8:30)
 - **Do:** type `=6`, then run these one at a time:
   - **`/D IPLINFO`:** an operator console command; shows when the system was IPLed and from which volume.
   - **`TSO LISTCAT LEVEL(Z72230.EWS) NAME`:** a TSO command; the catalog entries of our data sets.
@@ -111,13 +124,13 @@
 - **Say:** *"Everything here runs on the real mainframe over SSH: UNIX, TSO and the operator console, from one prompt."*
 - **Do:** press Up to show command history.
 
-### Step 10: Option 5, SYSLOG (8:30)
+### Step 11: Option 5, SYSLOG (9:30)
 - **Do:** type `=5`.
 - **Show:** every line from the demo: `EWS110I JOB … SUBMITTED`, `EWS111I … ENDED CC 0004`, `EWS120I UPLOAD …`, `EWS201I RUN … STEP … OK`, `EWS300I SSH …`, each with its duration in ms.
 - **Do:** type `ERR`. Only warnings and errors remain. Then type `ALL`.
 - **Say:** *"This is the audit trail: every mainframe call from the web app, this console and the CLI, with z/OS-style message IDs."*
 
-### Step 11: Exit (9:30)
+### Step 12: Exit (10:30)
 - **Do:** type `=X`, or press `F3` on the menu.
 - **Say:** *"The bank staff use the web dashboard; the operator uses this console. Both drive the same mainframe batch."*
 

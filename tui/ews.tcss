@@ -248,6 +248,14 @@ Sparkline > .sparkline--min-color {
 }
 
 /* ---------------------------------------------------------- reports */
+#vsam-detail {
+    height: auto;
+}
+
+.half {
+    width: 1fr;
+}
+
 #rpt-top {
     height: auto;
     max-height: 18;

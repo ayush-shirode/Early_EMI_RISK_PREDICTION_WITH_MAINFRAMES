@@ -43,11 +43,12 @@ make test        # = .venv/bin/python -m pytest -q tests
 |---|---|
 | `test_layouts.py` | Python layouts = copybooks (every field length, every LRECL); FEAT2CSV member = generated from the layouts; all mainframe sources are ASCII and fit their fixed columns |
 | `test_generator_and_rules.py` | records have exact lengths; generator is deterministic; every injected defect is rejected with the expected reason code; TRAIN/SCORE label behaviour; **no data after the as-of date affects features** |
+| `test_vsam.py` | IDCAMS output parsing on real z/OS output (`PRINT … HEX` decoded from EBCDIC, `LISTCAT` statistics); key not found is an empty result; both KSDS records parsed for a lookup; EWSSUPD counters read from SYSOUT; report lines carry the VSAM name; every data set qualifier fits 8 characters |
 | `test_zos.py` | the z/OSMF client builds the right requests (JCL symbols as headers, quoted upper-case data set paths, half-track block sizes) and reports z/OSMF errors; a run in another live process blocks a new one, and a dead process's run is cleaned up |
 | `test_pipeline.py` | JESYSMSG step-RC parsing (normal, proc step, skipped, abend); RUNCTL/REJREC parsing; API rejects unknown actions, bad parameters, bad job IDs and non-project data set names |
 | `test_mainframe_golden.py` | **the CSV produced by COBOL on z/OS equals the Python reference rules for every customer and every field** (runs on the latest downloaded batch output; skipped if none) |
 
-Current result: 34 passed, 1 skipped (the golden test, until a new batch run is downloaded).
+Current result: 45 passed (the golden test included).
 
 ## 6. Troubleshooting
 

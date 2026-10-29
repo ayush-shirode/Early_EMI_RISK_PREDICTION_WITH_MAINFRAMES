@@ -64,7 +64,7 @@ Numbers change if you regenerate the data with another seed or customer count.
 | Question | Answer |
 |---|---|
 | Why use a mainframe at all? | Most core banking data still lives on z/OS, and nightly batch (sort, validate, match, reconcile) is how it is processed. The project shows ML added on top of that, without moving the data preparation off the mainframe. |
-| What database is used? | On z/OS, sequential data sets (QSAM) with COBOL copybook layouts; no VSAM or DB2. Locally, SQLite only caches results for the web pages. See [MAINFRAME_DATASETS.md](MAINFRAME_DATASETS.md). |
+| What database is used? | On z/OS, sequential data sets (QSAM) with COBOL copybook layouts for the batch, and two VSAM KSDS keyed by customer ID (customer master, latest score per customer, updated in place by COBOL); no DB2. Locally, SQLite only caches results for the web pages. See [MAINFRAME_DATASETS.md](MAINFRAME_DATASETS.md). |
 | How does the app talk to the mainframe? | Our own client for the z/OSMF REST API over HTTPS (data sets and jobs), plus SSH to z/OS UNIX for the operator console and our agent there. Credentials come from the OS keyring. See [MAINFRAME_CONNECTION.md](MAINFRAME_CONNECTION.md). |
 | How do you know the COBOL is correct? | The same rules are implemented in Python; a test compares the mainframe's output with them for every customer and every field. They match exactly. |
 | Is the data real? | No, it is synthetic, because Z Xplore is a shared IBM education system. The generator builds in realistic early-warning patterns (spending rises and balances fall before payments fail) and about 1% bad records. |

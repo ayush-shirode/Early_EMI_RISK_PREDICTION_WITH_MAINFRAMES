@@ -110,3 +110,15 @@ export interface ModelMetrics {
   }>;
   feature_importance: { feature: string; mean_abs_shap: number }[];
 }
+
+/** GET /customers/{id}/vsam: the customer read by key from the VSAM KSDS on z/OS. */
+export interface VsamCustomer {
+  cust_id: string;
+  customer: { cust_name: string; city: string; age: number; credit_score: number; monthly_income: number; status: string } | null;
+  score: {
+    asof: number; prob: number; tier: string; action: string; top_factor: string; total_emi: number;
+    prev_asof: number; prev_prob: number; prev_tier: string; times_scored: number;
+  } | null;
+  ms: number;
+  source: { customer: string; score: string };
+}

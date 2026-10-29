@@ -43,7 +43,7 @@
 | **z/OS data sets** (`Z72230.EWS.*`) | Input master files, intermediate sorted/validated files, features, rejects, control totals, scores, report | **System of record**. All data preparation happens here. See [MAINFRAME_DATASETS.md](MAINFRAME_DATASETS.md). |
 | **SQLite** (`CP/data/ews.sqlite`) | Run history and step status, a copy of the customer/loan/monthly master data downloaded from z/OS, predictions with SHAP values | **Serving cache** for the dashboard, so pages load instantly and still work if the mainframe is offline. See [BACKEND_AND_DATABASE.md](BACKEND_AND_DATABASE.md). |
 
-No VSAM or DB2 is used, as planned: everything on z/OS is QSAM sequential files and PDS-E libraries.
+On z/OS the batch data is QSAM sequential files and the code is in PDS-E libraries; two **VSAM KSDS** clusters keyed by customer ID (`CUSTKSDS`, `SCORKSDS`) give keyed access to one customer. No DB2. See [MAINFRAME_DATASETS.md](MAINFRAME_DATASETS.md#35-vsam-clusters-ksds-key--customer-id).
 
 ## 3. End-to-end data flow of one scoring run
 
@@ -58,6 +58,7 @@ User clicks "Run batch & score" (as-of 2026-09-30)
 │       STEP030 DFSORT        REPAYHST → REPAY.SRT, non-numeric → REJECTS (S01)
 │       STEP040 DFSORT        TXNSUMM  → TXN.SRT,   non-numeric → REJECTS (S02)
 │       STEP050 COBOL EWSVCUST  CUST.SRT → CUST.VALID, bad → REJECTS (C01-C08)
+│       STEP055 IDCAMS        CUST.VALID → VSAM KSDS CUSTKSDS (DEFINE CLUSTER + REPRO)
 │       STEP060 COBOL EWSVLOAN  LOAN.SRT → LOAN.VALID, bad → REJECTS (L01-L09)
 │       STEP070 COBOL EWSMATCH  4-file match → FEATURES (+ EXCEPT M01-M05)
 │       STEP080 DFSORT        FEATURES → FEATCSV (CSV, variable length)
@@ -67,7 +68,8 @@ User clicks "Run batch & score" (as-of 2026-09-30)
 ├─4  download: CUST.VALID, LOAN.VALID, TXN.SRT → SQLite (names, loans, history for the UI)
 ├─5  Python: XGBoost probability + SHAP for every customer → SQLite predictions
 ├─6  Python writes SCOREREC records → create + upload → Z72230.EWS.SCORES
-├─7  submit EWSRPTJ: DFSORT sorts scores by risk, COBOL EWSRPT prints RISKRPT
+├─7  submit EWSRPTJ: COBOL EWSSUPD updates the VSAM KSDS SCORKSDS by key, DFSORT sorts scores by risk,
+│     COBOL EWSRPT prints RISKRPT with names read by key from the KSDS CUSTKSDS; then LISTCAT checks both
 └─8  download RISKRPT → shown in the dashboard's Reports page
 ```
 
@@ -84,6 +86,7 @@ Every arrow that touches z/OS is one z/OSMF REST call made by `pipeline/zos.py`;
 | Mainframe does all data preparation | That is the point of the project: the batch is the system of record and the ML only consumes its output. It also mirrors how banks actually run nightly batch. |
 | Own z/OSMF client in the backend, not in the browser | The browser never holds mainframe credentials; the backend reads them from the OS keyring. Calling z/OSMF directly removes the Zowe CLI dependency (Node.js, one subprocess per call) and lets every call be logged with its timing. |
 | A second channel over SSH | z/OSMF cannot run commands. SSH to USS gives the operator console a shell, TSO and console commands, and a place for our own agent; it also gives an independent check of whether the system is up. |
+| Sequential files for the batch, VSAM KSDS for single customers | The batch reads every record once: sequential access is fastest and needs no index. Looking up or updating one customer (latest score, previous score) is what a KSDS index is for, so the score history is updated in place by key instead of rewriting a file. |
 | Run lock in SQLite, not in memory | The backend, the operator console and the CLI can all start actions; a check-and-insert inside `BEGIN IMMEDIATE` and the owning process ID keep it to one run at a time, and a run whose process died stops blocking. |
 | Whitelisted actions instead of a generic "run command" API | The web API acts with your z/OS identity. It can only start eight named actions with validated parameters, and data set names are always built server-side. |
 | One action at a time | All runs share the same `EWS.*` data sets; a second run would overwrite the first. |

@@ -2,21 +2,21 @@
 
 ## 1. What kind of "database" this is
 
-There is no relational database on the mainframe side. The data is stored the way classic z/OS batch systems store it: in **data sets**, cataloged files managed by z/OS (SMS-managed on 3390 disk volumes), with **fixed-length records** whose fields are defined by **COBOL copybooks**.
+There is no relational database on the mainframe side. The data is stored the way classic z/OS batch systems store it: in **data sets**, cataloged files managed by z/OS (SMS-managed on 3390 disk volumes), with **fixed-length records** whose fields are defined by **COBOL copybooks**. The batch works on sequential files; two **VSAM KSDS** clusters, keyed by customer ID, add random access to single customers.
 
 | Concept | In this project |
 |---|---|
-| Data set organisation | **PS** (physical sequential, read and written with QSAM) for data; **PO-E / PDS-E** (partitioned, "library") for source code and load modules |
+| Data set organisation | **PS** (physical sequential, read and written with QSAM) for batch data; **VSAM KSDS** (key-sequenced, indexed) for the customer master and the latest scores; **PO-E / PDS-E** (partitioned, "library") for source code and load modules |
 | Record format | **FB** fixed blocked (most), **VB** variable blocked (the CSV), **FBA** fixed with ASA print control (the report), **U** undefined (load modules) |
 | Record length (LRECL) | 80, 100, 120, 200 bytes for FB; up to 1024 for VB; 133 for the print report |
 | Block size | `BLKSIZE=0` in JCL, so z/OS picks the optimal block size (e.g. 27,920 for LRECL 80) |
 | "Schema" | COBOL copybooks in `mainframe/copybooks/` (and `Z72230.EWS.CPY`), mirrored in Python by `ml/layouts.py` |
-| "Keys" / ordering | No index: files are sorted by DFSORT on the key fields and processed sequentially, matching on the keys |
+| "Keys" / ordering | Sequential files have no index: they are sorted by DFSORT on the key fields and processed sequentially, matching on the keys. The two KSDS have a real index on the 8-byte customer ID. |
 | Character set | EBCDIC IBM-1047 on z/OS, ASCII locally (converted by z/OSMF on transfer) |
 | Numbers | Zoned decimal `PIC 9(n)V99`: digits as characters with an *implied* decimal point (`000004530000` = 45,300.00). No signs. |
-| Not used | VSAM (KSDS/ESDS), DB2, IMS: the planned design was sequential batch only |
+| Not used | DB2, IMS, VSAM ESDS/RRDS |
 
-This is the "master file + sort + match" pattern that most bank batch systems still use for nightly processing.
+This is the "master file + sort + match" pattern that most bank batch systems still use for nightly processing, with VSAM for keyed access to one customer at a time (see 3.5).
 
 ## 2. Naming
 
@@ -69,6 +69,19 @@ All project data sets start with the high-level qualifier `Z72230` (the z/OS use
 | `EWS.SCORES` | SCOREREC | FB 80 | backend (upload) | probability, tier, action code, top factor per customer |
 | `EWS.SCORES.SRT` | SCOREREC | FB 80 | EWSRPTJ STEP010 DFSORT | sorted by probability, highest first |
 | `EWS.RISKRPT` | print lines | FBA 133 | EWSRPTJ STEP020 EWSRPT | the paginated early intervention list |
+
+### 3.5 VSAM clusters (KSDS, key = customer ID)
+
+| Cluster | Components | Layout | Records | Created / updated by | Read by |
+|---|---|---|---|---|---|
+| `Z72230.EWS.CUSTKSDS` | `.DATA`, `.INDEX` | CUSTREC (100) | one per valid customer (1,475) | **EWSBATCH STEP055** (IDCAMS `DELETE`, `DEFINE CLUSTER`, `REPRO` from `CUST.VALID`), rebuilt every run | **EWSRPT** (random `READ` for the customer name), REXX EWSRECON (`LISTCAT` count), operator lookup |
+| `Z72230.EWS.SCORKSDS` | `.DATA`, `.INDEX` | SCOREVS (100) | one per customer ever scored (1,054) | **EWSRPTJ STEP006** defines it once; **EWSSUPD** updates it in place on every scoring run (`READ` by key, then `REWRITE` or `WRITE`) | operator lookup (TUI option 8, dashboard customer page, `GET /customers/{id}/vsam`) |
+
+Both are defined with `INDEXED KEYS(8 0) RECORDSIZE(100 100) TRACKS(15 5) SHAREOPTIONS(2 3)`; SMS places them (storage class `ZXPS`, data class `ZXPDX`, volume `ZXPC02` on this system) and they are catalogued in `CATALOG.ZOSO`. The CI size is 512 for the data and 6,144 for the index. `CUSTKSDS` has `FREESPACE(10 10)`, `SCORKSDS` `FREESPACE(20 10)` because new customers are inserted between existing keys. Qualifiers are at most 8 characters (`SCOREKSDS` would be rejected with `IEF642I`, which is why the name is `SCORKSDS`).
+
+Why both kinds: the nightly batch reads every record once, which sequential files do best (no index to maintain, one pass, DFSORT-friendly). Looking up or updating one customer is what an index is for: `SCORKSDS` keeps each customer's latest score and the one before it without rewriting the file, and any single record is read in one keyed access.
+
+Verified on 2026-10-29: run as-of 2026-08-31 loaded `SCORKSDS` (1,054 added, EWSSUPD found the new cluster empty, FS 35, and opened it for loading); run as-of 2026-09-30 updated 1,023 records in place (0 added, 49 changed tier); `LISTCAT` shows `REC-UPDATED 1023`; EWSRPT read all 1,023 names by key with none missing; `CHK_VSAM=OK` (1,475 = 1,475).
 
 Total footprint for 1,500 customers is a few MB (roughly 400 tracks).
 
@@ -190,6 +203,23 @@ What each feature means is in [ML_MODEL.md](ML_MODEL.md#2-features).
 | 62 | 9 | SC-TOTAL-EMI | 9(7)V99 | |
 | 71 | 10 | FILLER | | |
 
+### SCOREVS — latest score per customer (VSAM KSDS EWS.SCORKSDS, RECORDSIZE 100, key SV-CUST-ID)
+
+| Pos | Len | Field | PIC | Meaning |
+|---|---|---|---|---|
+| 1 | 8 | SV-CUST-ID | X(8) | key |
+| 9 | 8 | SV-ASOF | 9(8) | as-of date of the latest score |
+| 17 | 5 | SV-PROB | 9V9999 | probability |
+| 22 | 6 | SV-TIER | X(6) | `HIGH  `, `MEDIUM`, `LOW   ` |
+| 28 | 4 | SV-ACTION | X(4) | `INTV`, `REVW`, `MON` |
+| 32 | 30 | SV-TOP-FACTOR | X(30) | |
+| 62 | 9 | SV-TOTAL-EMI | 9(7)V99 | |
+| 71 | 8 | SV-PREV-ASOF | 9(8) | as-of of the score before this run (0 = first score) |
+| 79 | 5 | SV-PREV-PROB | 9V9999 | that probability |
+| 84 | 6 | SV-PREV-TIER | X(6) | that tier |
+| 90 | 4 | SV-TIMES-SCORED | 9(4) | number of scoring runs that wrote this record |
+| 94 | 7 | FILLER | | |
+
 ### REJREC — rejects and exceptions (LRECL 120)
 
 | Pos | Len | Field | Content |
@@ -229,6 +259,7 @@ local generator ──► CUSTMAST LOANMAST REPAYHST TXNSUMM
                   EWSVCUST EWSVLOAN       │        │      REJECTS ◄─ all four ─► UI Reports
                         ▼        ▼        │        │
                   CUST.VALID LOAN.VALID ──┼────────┼──────────────────────────► SQLite (customers, loans)
+                   │  IDCAMS REPRO                                    VSAM KSDS CUSTKSDS ◄── EWSRPT (READ by key)
                         └────────┴───► EWSMATCH ◄──┘      EXCEPT ───────────────► UI Reports
                                           ▼
                                        FEATURES ─► DFSORT ─► FEATCSV ──────────► Python model
@@ -236,5 +267,6 @@ local generator ──► CUSTMAST LOANMAST REPAYHST TXNSUMM
                        CTLTOT ──► REXX EWSRECON ─► RUNCTL ──────────────────────► gate (STATUS=OK)
                                                                                   ▼
                                     RISKRPT ◄── EWSRPT ◄── DFSORT ◄── SCORES ◄─── upload (z/OSMF)
+                                                                       └──► EWSSUPD (READ/REWRITE/WRITE) ──► VSAM KSDS SCORKSDS
                                        └──────────────────────────────────────────► UI Reports
 ```

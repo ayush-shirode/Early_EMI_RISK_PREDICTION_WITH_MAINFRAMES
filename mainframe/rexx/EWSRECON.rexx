@@ -6,6 +6,8 @@
 /*           CUSTSRT CUSTDUP LOANSRT REPAYSRT TXNSRT (DFSORT OUT)  */
 /*           REJECTS (REJREC)  CTLTOT (PROGRAM CONTROL TOTALS)     */
 /*           FEATOUT (FEATURE RECORDS)                             */
+/*  CATALOG: HLQ.EWS.CUSTKSDS (VSAM KSDS) - EXECIO CANNOT READ     */
+/*           VSAM, SO ITS RECORD COUNT COMES FROM LISTCAT          */
 /*  DD OUT : RUNCTL - ONE KEY=VALUE PER LINE, READ BY THE PYTHON   */
 /*           BACKEND. STATUS=OK MEANS EVERY RECORD IS ACCOUNTED    */
 /*           FOR AND THE FEATURES CAN BE SCORED.                   */
@@ -28,6 +30,7 @@ loan_srt  = count('LOANSRT')
 repay_srt = count('REPAYSRT')
 txn_srt   = count('TXNSRT')
 feat_out  = count('FEATOUT')
+vsam_cust = vsamcount(userid()'.EWS.CUSTKSDS')
 
 /* 2. REJECTS BY SOURCE FILE AND BY REASON CODE                    */
 rej. = 0
@@ -68,6 +71,7 @@ call put 'EXCL_CLOSED='ctl.EWSMATCH.EXCL_CLOSED
 call put 'EXCL_NO_LOAN='ctl.EWSMATCH.EXCL_NO_LOAN
 call put 'EXCL_DEFAULT='ctl.EWSMATCH.EXCL_DEFAULT
 call put 'FEATURES='feat_out
+call put 'CUSTKSDS_RECORDS='vsam_cust
 call put 'LABEL_POSITIVE='ctl.EWSMATCH.LABEL_POSITIVE
 do i = 1 to words(codes)
   code = word(codes, i)
@@ -91,6 +95,7 @@ call check 'CHK_MATCH',      ctl.EWSMATCH.CUST_READ =,
                              ctl.EWSVCUST.CUST_VALID &,
                              ctl.EWSMATCH.LOAN_READ =,
                              ctl.EWSVLOAN.LOAN_VALID
+call check 'CHK_VSAM',       vsam_cust = ctl.EWSVCUST.CUST_VALID
 call check 'CHK_FEATURES',   feat_out = ctl.EWSMATCH.FEATURES_WRITTEN &,
                              feat_out = ctl.EWSMATCH.CUST_READ -,
                              ctl.EWSMATCH.EXCL_CLOSED -,
@@ -118,6 +123,23 @@ count: procedure
     if erc <> 0 then leave          /* RC 2 = END OF FILE          */
   end
   "EXECIO 0 DISKR" dd "(FINIS"
+  return n
+
+/* REC-TOTAL OF THE DATA COMPONENT, FROM LISTCAT ALL (-1 IF THE   */
+/* CLUSTER IS MISSING, WHICH THEN FAILS CHK_VSAM)                  */
+vsamcount: procedure
+  parse arg dsn
+  n = -1
+  x = outtrap('lc.')
+  "LISTCAT ENTRIES('"dsn"') ALL"
+  x = outtrap('OFF')
+  do i = 1 to lc.0
+    p = pos('REC-TOTAL', lc.i)
+    if p > 0 then do
+      n = strip(word(substr(lc.i, p + 9), 1), 'L', '-') + 0
+      leave
+    end
+  end
   return n
 
 put: procedure expose out.

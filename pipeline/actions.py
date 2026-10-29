@@ -10,15 +10,16 @@ import csv
 import io
 import json
 import re
+import time
 from datetime import date
 from pathlib import Path
 
-from ml.layouts import CUSTREC, LOANREC, REJREC, SCOREREC, TXNREC
+from ml.layouts import CUSTREC, LOANREC, REJREC, SCOREREC, SCOREVS, TXNREC
 from pipeline import db, zos, zosconf
 from pipeline.config import HLQ_ENV, INPUT_DIR, MAINFRAME_SRC, SCORE_ASOF, TRAIN_ASOFS, Names
 from pipeline.runner import ActionError, RunContext
 
-PROGRAMS = ["EWSVCUST", "EWSVLOAN", "EWSMATCH", "EWSRPT"]
+PROGRAMS = ["EWSVCUST", "EWSVLOAN", "EWSMATCH", "EWSRPT", "EWSSUPD"]
 
 
 def hlq() -> str:
@@ -76,14 +77,19 @@ _RPT_LINE = re.compile(r"^ \s*(\d+)\s+(\S{8})\s+([\d.]+)\s+(HIGH|MEDIUM|LOW)\s+(
 
 
 def parse_riskrpt(lines: list[str]) -> list[dict]:
-    """Detail lines of the EWSRPT intervention list (RISKRPT)."""
+    """Detail lines of the EWSRPT intervention list (RISKRPT).
+
+    The risk factor and the customer name (read by EWSRPT from the VSAM KSDS CUSTKSDS) are
+    fixed columns: DT-FACTOR at 60-89 and DT-NAME at 92-121 (1-based, ASA byte included).
+    """
     rows = []
     for ln in lines:
         m = _RPT_LINE.match(ln)
         if m:
             rows.append({"rank": int(m.group(1)), "cust_id": m.group(2), "risk_pct": float(m.group(3)),
                          "tier": m.group(4), "action": m.group(5),
-                         "total_emi": float(m.group(6).replace(",", "")), "top_factor": m.group(7).strip()})
+                         "total_emi": float(m.group(6).replace(",", "")),
+                         "top_factor": ln[59:89].strip(), "name": ln[91:121].strip()})
     return rows
 
 
@@ -126,6 +132,30 @@ def run_ewsbatch(ctx: RunContext, step, asof: int, mode: str, tag: str) -> dict:
                 f"{runctl.get('CUST_REJECTED', 0) + runctl.get('LOAN_REJECTED', 0) + runctl.get('REPAY_REJECTED', 0) + runctl.get('TXN_REJECTED', 0)} rejected, "
                 f"{runctl.get('MATCH_EXCEPTIONS')} exceptions, reconciliation OK")
     return {"job": job, "runctl": runctl, "dir": out}
+
+
+def job_displays(jobid: str, stepname: str, program: str) -> dict:
+    """Counters a COBOL program DISPLAYed to SYSOUT, e.g. 'EWSSUPD ADDED        000000012'."""
+    f = next((f for f in zos.spool_files(jobid) if f.get("stepname") == stepname and f.get("ddname") == "SYSOUT"), None)
+    if not f:
+        return {}
+    text = zos.spool_content(jobid, f["id"])
+    return {re.sub(r"[ -]+", "_", k.strip().lower()): int(v)
+            for k, v in re.findall(rf"{program} ([A-Z][A-Z -]*?)\s+(\d{{7,9}})\s*$", text, re.M)}
+
+
+def check_vsam(step, scored: int) -> dict:
+    """Catalog check of both KSDS after a scoring run: record counts from LISTCAT."""
+    n = names()
+    cust = zos.listcat(n.CUSTKSDS).get("data", {})
+    score = zos.listcat(n.SCORKSDS).get("data", {})
+    out = {"custksds_records": cust.get("rec-total"), "scoreksds_records": score.get("rec-total"),
+           "scoreksds_updated": score.get("rec-updated"), "scoreksds_inserted": score.get("rec-inserted"),
+           "volume": cust.get("volser")}
+    step.data(vsam=out)
+    if not out["scoreksds_records"] or out["scoreksds_records"] < scored:
+        raise ActionError(f"{n.SCORKSDS} holds {out['scoreksds_records']} records, fewer than the {scored} scored")
+    return out
 
 
 def validate_asof(asof) -> int:
@@ -280,7 +310,8 @@ def run_batch(ctx: RunContext, asof: int = SCORE_ASOF) -> None:
     n = names()
     ctx.plan(["Submit EWSBATCH (DFSORT, COBOL, REXX)", "Load master data from the mainframe",
               "Score customers (model + SHAP)", "Write scores back (EWS.SCORES)",
-              "Submit EWSRPTJ (intervention report)", "Download report (EWS.RISKRPT)"])
+              "Submit EWSRPTJ (VSAM update + intervention report)", "Check VSAM clusters (LISTCAT)",
+              "Download report (EWS.RISKRPT)"])
     with ctx.step("Submit EWSBATCH (DFSORT, COBOL, REXX)") as s:
         res = run_ewsbatch(ctx, s, asof, "SCORE", "score")
     with ctx.step("Load master data from the mainframe") as s:
@@ -303,13 +334,24 @@ def run_batch(ctx: RunContext, asof: int = SCORE_ASOF) -> None:
         zos.create_sequential(n.SCORES, "FB", 80, "15TRK")
         zos.upload_file(local, n.SCORES)
         s.detail(f"{len(result['score_records'])} SCOREREC records uploaded to {n.SCORES}")
-    with ctx.step("Submit EWSRPTJ (intervention report)") as s:
+    with ctx.step("Submit EWSRPTJ (VSAM update + intervention report)") as s:
         rpt = submit_job(s, "EWSRPTJ", max_rc=0)
+        supd = job_displays(rpt["jobid"], "STEP008", "EWSSUPD")
+        rpt_counts = job_displays(rpt["jobid"], "STEP020", "EWSRPT")
+        s.data(vsam_update=supd, report=rpt_counts)
+        s.detail(f"EWSRPTJ {rpt['jobid']} {rpt['retcode']}: {n.SCORKSDS} {supd.get('added', 0)} added, "
+                 f"{supd.get('updated', 0)} updated in place ({supd.get('tier_changed', 0)} changed tier); "
+                 f"{rpt_counts.get('names_from_vsam', 0)} names read by key from {n.CUSTKSDS}")
+    with ctx.step("Check VSAM clusters (LISTCAT)") as s:
+        vsam = check_vsam(s, result["scored"])
+        s.detail(f"{n.CUSTKSDS} {vsam['custksds_records']} records, {n.SCORKSDS} {vsam['scoreksds_records']} "
+                 f"records ({vsam['scoreksds_updated']} updates so far) on {vsam['volume']}")
     with ctx.step("Download report (EWS.RISKRPT)") as s:
         zos.download(n.RISKRPT, ctx.dir / "riskrpt.txt")
         s.detail(f"Report downloaded ({len((ctx.dir / 'riskrpt.txt').read_text().splitlines())} lines)")
     ctx.summary = {"asof": asof, "batch_job": res["job"]["jobid"], "report_job": rpt["jobid"],
-                   "runctl": res["runctl"], "tiers": result["tiers"], "scored": result["scored"]}
+                   "runctl": res["runctl"], "tiers": result["tiers"], "scored": result["scored"],
+                   "vsam": {**vsam, **supd}}
     db.kv_set("last_score_run", ctx.run_id)
 
 
@@ -322,9 +364,16 @@ def reset_data(ctx: RunContext, confirm: bool = False) -> None:
         keep = {n.JCL, n.CPY, n.CNTL, n.REXX}
         removed = []
         for d in zos.list_datasets(f"{n.hlq}.EWS.**"):
-            if d["dsname"] not in keep:
-                zos.delete(d["dsname"])
-                removed.append(d["dsname"])
+            name = d["dsname"]
+            if name in keep:
+                continue
+            if d.get("dsorg") == "VS":
+                if name.endswith((".DATA", ".INDEX")):
+                    continue  # components go with their cluster
+                zos.delete_vsam(name)
+            else:
+                zos.delete(name)
+            removed.append(name)
         s.data(deleted=removed)
         s.detail(f"Deleted {len(removed)} data sets (libraries kept)")
     db.kv_set("data", None)
@@ -360,8 +409,43 @@ def mainframe_status() -> dict:
         "libraries": {l: l in dsns for l in libs},
         "programs": {p: p in load for p in PROGRAMS},
         "inputs": {i["name"]: i["name"] in dsns for i in n.inputs()},
+        "vsam": {v: v in dsns for v in (n.CUSTKSDS, n.SCORKSDS)},
         "datasets": sorted(dsns),
     }
+
+
+def vsam_customer(cust_id: str) -> dict:
+    """One customer straight from the two VSAM KSDS on z/OS, read by key (IDCAMS PRINT via z/OSMF)."""
+    cust_id = cust_id.upper()
+    if not re.fullmatch(r"[A-Z0-9]{8}", cust_id):
+        raise ActionError("Customer IDs are 8 letters or digits, e.g. CUST0166")
+    n = names()
+    t0 = time.monotonic()
+    cust = zos.vsam_read(n.CUSTKSDS, cust_id)
+    score = zos.vsam_read(n.SCORKSDS, cust_id)
+    ms = int((time.monotonic() - t0) * 1000)
+    c = CUSTREC.parse(cust[0]) if cust else None
+    sc = SCOREVS.parse(score[0]) if score else None
+    for rec in (c, sc):
+        if rec:
+            rec.pop("filler", None)
+    return {"cust_id": cust_id, "customer": c, "score": sc, "ms": ms,
+            "source": {"customer": n.CUSTKSDS, "score": n.SCORKSDS},
+            "raw": {"customer": cust[0] if cust else None, "score": score[0] if score else None}}
+
+
+def vsam_clusters() -> list[dict]:
+    """LISTCAT statistics of the project's KSDS clusters (missing ones are reported as such)."""
+    out = []
+    for dsn, role in ((names().CUSTKSDS, "customer master, rebuilt by EWSBATCH STEP055"),
+                      (names().SCORKSDS, "latest score per customer, updated in place by EWSSUPD")):
+        try:
+            lc = zos.listcat(dsn)
+        except zos.ZosError as e:
+            out.append({"dsname": dsn, "role": role, "exists": False, "error": str(e)[:300]})
+            continue
+        out.append({"dsname": dsn, "role": role, "exists": "data" in lc, **lc})
+    return out
 
 
 def dataset_info(dsn: str) -> dict:

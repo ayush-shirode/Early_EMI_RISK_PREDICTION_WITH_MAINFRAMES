@@ -112,6 +112,13 @@ SCOREREC = Layout("SCOREREC", "SCOREREC.cpy", 80, (
     X("top_factor", 30), N("total_emi", 9, 2), X("filler", 10),
 ))
 
+# Latest score per customer in the VSAM KSDS EWS.SCORKSDS (key = cust_id), kept by EWSSUPD.
+SCOREVS = Layout("SCOREVS", "SCOREVS.cpy", 100, (
+    X("cust_id", 8), N("asof", 8), N("prob", 5, 4), X("tier", 6), X("action", 4),
+    X("top_factor", 30), N("total_emi", 9, 2), N("prev_asof", 8), N("prev_prob", 5, 4),
+    X("prev_tier", 6), N("times_scored", 4), X("filler", 7),
+))
+
 REJREC = Layout("REJREC", "REJREC.cpy", 120, (
     X("source", 8), X("key", 10), X("reason_code", 4), X("reason_text", 40), X("data", 58),
 ))

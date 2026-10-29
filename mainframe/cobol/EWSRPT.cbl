@@ -6,6 +6,8 @@
       *           HIGHEST RISK FIRST, WITH TOTALS PER RISK TIER.       *
       *                                                                *
       *   SCOREIN : EWS.SCORES.SRT  SCOREREC SORTED BY PROB DESC FB 80 *
+      *   CUSTKS  : EWS.CUSTKSDS    CUSTREC, VSAM KSDS KEY CU-CUST-ID  *
+      *             READ BY KEY (RANDOM) FOR THE CUSTOMER NAME         *
       *   RPTOUT  : EWS.RISKRPT     PRINT LINES WITH ASA CTL   FBA 133 *
       *                                                                *
       *   RETURN CODE  0 OK   4 NO SCORES   16 FILE ERROR              *
@@ -15,6 +17,11 @@
        FILE-CONTROL.
            SELECT SCORE-IN  ASSIGN TO SCOREIN FILE STATUS IS WS-FS-IN.
            SELECT RPT-OUT   ASSIGN TO RPTOUT  FILE STATUS IS WS-FS-OUT.
+           SELECT CUST-KS   ASSIGN TO CUSTKS
+                  ORGANIZATION IS INDEXED
+                  ACCESS MODE IS RANDOM
+                  RECORD KEY IS CU-CUST-ID
+                  FILE STATUS IS WS-FS-KS.
 
        DATA DIVISION.
        FILE SECTION.
@@ -22,10 +29,15 @@
            COPY SCOREREC.
        FD  RPT-OUT   RECORDING MODE F.
        01  RPT-LINE                  PIC X(133).
+       FD  CUST-KS.
+           COPY CUSTREC.
 
        WORKING-STORAGE SECTION.
        01  WS-FS-IN                  PIC XX.
        01  WS-FS-OUT                 PIC XX.
+       01  WS-FS-KS                  PIC XX.
+       01  WS-NAMES-FOUND            PIC 9(7)  VALUE 0.
+       01  WS-NAMES-MISSING          PIC 9(7)  VALUE 0.
        01  WS-EOF                    PIC X     VALUE 'N'.
            88  END-OF-SCORES                   VALUE 'Y'.
        01  WS-LINES-ON-PAGE          PIC 9(3)  VALUE 99.
@@ -66,8 +78,10 @@
            05  FILLER                PIC X     VALUE '0'.
            05  FILLER                PIC X(46) VALUE
                '   RANK  CUSTOMER  RISK %  TIER    ACTN'.
-           05  FILLER                PIC X(86) VALUE
+           05  FILLER                PIC X(44) VALUE
                '   TOTAL EMI INR  TOP RISK FACTOR'.
+           05  FILLER                PIC X(42) VALUE
+               'CUSTOMER NAME (VSAM)'.
        01  HDR-3.
            05  FILLER                PIC X     VALUE ' '.
            05  FILLER                PIC X(132) VALUE ALL '-'.
@@ -86,7 +100,9 @@
            05  DT-EMI                PIC Z,ZZZ,ZZ9.99.
            05  FILLER                PIC X(5)  VALUE SPACES.
            05  DT-FACTOR             PIC X(30).
-           05  FILLER                PIC X(44) VALUE SPACES.
+           05  FILLER                PIC XX    VALUE SPACES.
+           05  DT-NAME               PIC X(30).
+           05  FILLER                PIC X(12) VALUE SPACES.
        01  TOT-LINE.
            05  FILLER                PIC X     VALUE '0'.
            05  TL-LABEL              PIC X(20).
@@ -98,9 +114,11 @@
 
        PROCEDURE DIVISION.
        0000-MAIN.
-           OPEN INPUT SCORE-IN OUTPUT RPT-OUT
+           OPEN INPUT SCORE-IN CUST-KS OUTPUT RPT-OUT
            IF WS-FS-IN NOT = '00' OR WS-FS-OUT NOT = '00'
-               DISPLAY 'EWSRPT OPEN ERROR FS=' WS-FS-IN '/' WS-FS-OUT
+           OR (WS-FS-KS NOT = '00' AND WS-FS-KS NOT = '97')
+               DISPLAY 'EWSRPT OPEN ERROR FS ' WS-FS-IN ' '
+                       WS-FS-OUT ' ' WS-FS-KS
                MOVE 16 TO RETURN-CODE
                STOP RUN
            END-IF
@@ -110,7 +128,7 @@
                PERFORM 2000-READ
            END-PERFORM
            PERFORM 8000-TOTALS
-           CLOSE SCORE-IN RPT-OUT
+           CLOSE SCORE-IN CUST-KS RPT-OUT
            IF WS-RANK = 0
                MOVE 4 TO RETURN-CODE
            ELSE
@@ -139,6 +157,7 @@
            MOVE SC-ACTION      TO DT-ACTION
            MOVE SC-TOTAL-EMI   TO DT-EMI
            MOVE SC-TOP-FACTOR  TO DT-FACTOR
+           PERFORM 3200-CUSTOMER-NAME
            WRITE RPT-LINE FROM DTL-LINE
            ADD 1 TO WS-LINES-ON-PAGE
            ADD SC-PROB TO WS-PROB-SUM
@@ -153,6 +172,19 @@
                    ADD 1 TO WS-CNT-LOW
                    ADD SC-TOTAL-EMI TO WS-EMI-LOW
            END-EVALUATE.
+
+       3200-CUSTOMER-NAME.
+           MOVE SC-CUST-ID TO CU-CUST-ID
+           READ CUST-KS
+               INVALID KEY CONTINUE
+           END-READ
+           IF WS-FS-KS = '00'
+               MOVE CU-CUST-NAME TO DT-NAME
+               ADD 1 TO WS-NAMES-FOUND
+           ELSE
+               MOVE '** NOT IN CUSTKSDS **' TO DT-NAME
+               ADD 1 TO WS-NAMES-MISSING
+           END-IF.
 
        3100-HEADINGS.
            ADD 1 TO WS-PAGE
@@ -185,4 +217,6 @@
            DISPLAY 'EWSRPT CUSTOMERS LISTED  ' WS-RANK
            DISPLAY 'EWSRPT HIGH RISK         ' WS-CNT-HIGH
            DISPLAY 'EWSRPT MEDIUM RISK       ' WS-CNT-MEDIUM
-           DISPLAY 'EWSRPT LOW RISK          ' WS-CNT-LOW.
+           DISPLAY 'EWSRPT LOW RISK          ' WS-CNT-LOW
+           DISPLAY 'EWSRPT NAMES FROM VSAM   ' WS-NAMES-FOUND
+           DISPLAY 'EWSRPT NAMES MISSING     ' WS-NAMES-MISSING.

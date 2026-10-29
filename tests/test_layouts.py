@@ -27,7 +27,8 @@ def copybook_fields(name: str) -> list[int]:
 
 
 @pytest.mark.parametrize("layout", [layouts.CUSTREC, layouts.LOANREC, layouts.REPAYREC,
-                                    layouts.TXNREC, layouts.SCOREREC, layouts.REJREC])
+                                    layouts.TXNREC, layouts.SCOREREC, layouts.SCOREVS,
+                                    layouts.REJREC])
 def test_layout_matches_copybook(layout):
     assert [f.length for f in layout.fields] == copybook_fields(layout.copybook)
     assert layout.used == layout.lrecl

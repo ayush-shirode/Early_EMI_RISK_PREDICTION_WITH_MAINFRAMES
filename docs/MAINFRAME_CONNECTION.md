@@ -81,6 +81,11 @@ def request(method, path, *, params=None, headers=None, body=None, json_body=Non
 | Job list (TUI SDSF panel) | `list_jobs(owner, prefix)` | `GET /zosmf/restjobs/jobs?owner=&prefix=&max-jobs=` |
 | Spool files / content | `spool_files(jobid)`, `spool_content(jobid, id)` | `GET .../files`, `GET .../files/{id}/records` |
 | Purge job (TUI) | `delete_job(jobid)` | `DELETE /zosmf/restjobs/jobs/{name}/{id}` |
+| Run IDCAMS commands | `idcams("LISTCAT ...")` | `PUT /zosmf/restfiles/ams` `{"input": [...], "JSONversion": 1}` |
+| VSAM statistics | `listcat(dsn)` | IDCAMS `LISTCAT ENTRIES(dsn) ALL`, parsed (`REC-TOTAL`, `REC-UPDATED`, splits, CI size, volume) |
+| Read a VSAM record by key | `vsam_read(dsn, "CUST0166")` | IDCAMS `PRINT INDATASET(dsn) FROMKEY(k) TOKEY(k) HEX`; the hex is converted from EBCDIC locally. No record: z/OSMF answers HTTP 500 with `NUMBER OF RECORDS PROCESSED WAS 0`, returned as "not found" |
+| Browse a VSAM cluster | `vsam_records(dsn, 500)` | IDCAMS `PRINT INDATASET(dsn) COUNT(500) HEX` |
+| Delete a VSAM cluster | `delete_vsam(dsn)` | IDCAMS `DELETE dsn CLUSTER` |
 
 Verified on the real system (2026-10-28): the RISKRPT download is byte-identical to the file Zowe CLI had downloaded, a 300-record round trip with special characters (`#@$ {}[]|!^~`) comes back unchanged, and `compile` (upload 12 members, submit EWSCOMP, step RCs, verify load modules) runs end to end.
 
@@ -138,6 +143,8 @@ Every z/OSMF request, upload, download, job, SSH command, run step and channel c
 | Occasional connection resets | `zos.request` retries idempotent calls up to 3 times with back-off (`EWS102W`) |
 | One COBOL source was always cut off during upload: the network filter in front of z/OSMF flags content that looks like SQL injection (`SELECT ...` together with literals such as `' HIGH=' ... ' LOW='`) | The `DISPLAY` text in `EWSRPT` was reworded; the upload error message explains this case if it ever happens again |
 | `/zosmf/info` needs authentication here (it is often public) | `ping()` uses the logged-on session |
+| z/OSMF restfiles cannot read or write VSAM records | VSAM goes through the AMS (IDCAMS) endpoint; `PRINT ... CHARACTER` shows lowercase letters as dots, so records are printed in `HEX` and decoded locally |
+| Occasional HTTP 500 `__msgrcv_timed error timed out` from z/OSMF's back end | retried like a connection error (`EWS102W`), never for a submit |
 | SMS rejects allocations in cylinders, tracks work | All allocations, in the backend and in JCL `SPACE=`, use tracks |
 | The site `IGYWCL` compile procedure reads `&SYSUID..CBL(&SRC)` and links into `&SYSUID..LOAD(&SRC)`; its COBOL step has no `SYSLIB` | COBOL sources go to `Z72230.CBL`; `EWSCOMP` adds `//COBOL.SYSLIB DD DSN=&SYSUID..EWS.CPY` |
 | DFSORT on this system does not support `SUM FIELDS=NONE,XSUM` (`ICE172A`) | Duplicate removal uses ICETOOL `SELECT ... FIRST DISCARD(DUPS)` |

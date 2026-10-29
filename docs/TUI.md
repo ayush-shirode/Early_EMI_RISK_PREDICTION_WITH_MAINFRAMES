@@ -27,7 +27,7 @@ The status line is on every panel. It shows both channels (state and latency fro
 
 | Input | Effect |
 |---|---|
-| `0`–`7` or the option name on the primary menu | open that option |
+| `0`–`8` or the option name on the primary menu | open that option |
 | `=N` on any panel | jump to option N (`=X` exits) |
 | `TSO <command>` or `/<console command>` on any panel | run it on z/OS (opens the command shell) |
 | `F3` / `Esc` | back one panel; exit on the primary menu |
@@ -48,7 +48,8 @@ The status line is on every panel. It shows both channels (state and latency fro
 | 4 | **PIPELINE** (`EWSPIPE`) | The batch pipeline. Actions 1–8 (test, setup, compile, sources, generate, train, run batch, reset), started with their number, Enter, or a command (`RUN 20260930`, `TRAIN`, `GEN 1500 42`, `RESET`). Each asks for its parameters or for confirmation; RESET needs the word RESET typed. Next to them is the run history from every process (with `FROM` = API, TUI or CLI). Below, the selected run's steps with status, start, duration and detail; for steps that ran a job, its JCL step return codes as a flow; for EWSBATCH, the REXX reconciliation checks. Refreshes every 1.5 s. |
 | 5 | **SYSLOG** (`EWSLOG`) | The operator log, live: every z/OSMF request with HTTP status and duration, uploads/downloads with record counts, job submit/end, run steps, SSH commands, channel up/down, logon. Errors red, warnings yellow. `ERR` shows only warnings and errors, `ALL` everything, `CLEAR` empties the display. |
 | 6 | **COMMAND** (`EWSCMD`) | Command shell on z/OS over SSH. Plain text runs in the USS shell (ZOAU on the PATH: `dls`, `jls`, `dcat`…), `TSO <cmd>` runs a TSO/E command (`TSO LISTCAT LEVEL(Z72230.EWS)`), `/<cmd>` an operator console command (`/D IPLINFO`, `/D T`, `/D A,L`). Shows the output, the RC and the time; Up/Down recall earlier commands. |
-| 7 | **REPORTS** (`EWSRPT`) | For the last scoring run (or `RUN n`): the REXX reconciliation (RUNCTL) with every check, rejects and matching exceptions by reason code, and the COBOL early intervention list. `RPT`, `REJ`, `EXC` open the full text. |
+| 7 | **REPORTS** (`EWSRPT`) | For the last scoring run (or `RUN n`): the REXX reconciliation (RUNCTL) with every check (including `CHK_VSAM`), rejects and matching exceptions by reason code, and the COBOL early intervention list with the customer names EWSRPT read by key from VSAM. `RPT`, `REJ`, `EXC` open the full text. |
+| 8 | **VSAM** (`EWSVSAM`) | The two VSAM KSDS clusters (`CUSTKSDS`, `SCORKSDS`) with their `LISTCAT` statistics: records, inserted, updated, deleted, retrieved, CI/CA splits, CI size, key, volume. Type a customer ID (`CUST0166`, or `KEY CUST0166`) to read both records by key: the customer master, and the latest and previous score with the change and how often it was scored, plus the raw 100-byte records under a column ruler with the key highlighted. `B` browses a cluster's first 500 records in key order. VSAM clusters in DSLIST open the same browse. |
 
 ## Runs started from the console
 

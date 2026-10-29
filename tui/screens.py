@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import time
 from datetime import datetime
@@ -123,6 +124,7 @@ OPTIONS = [
     ("5", "SYSLOG", "Operator log - every mainframe call, run event and error"),
     ("6", "COMMAND", "USS shell, TSO and operator console commands over SSH"),
     ("7", "REPORTS", "Reconciliation, rejected records, intervention list"),
+    ("8", "VSAM", "VSAM KSDS clusters - statistics, browse, read a customer by key"),
     ("X", "EXIT", "Leave the EWS operator console"),
 ]
 
@@ -137,7 +139,7 @@ BANNER = r"""
 class MainMenu(Panel):
     PANEL_ID = "EWSPRIM"
     PANEL_TITLE = "EWS PRIMARY OPTION MENU"
-    PFKEYS = "F1=HELP  F3=EXIT  ENTER=SELECT  0-7=OPTION"
+    PFKEYS = "F1=HELP  F3=EXIT  ENTER=SELECT  0-8=OPTION"
     HELP = ("Type an option number (or its name) on the command line, or move to a line\n"
             "and press ENTER. From any panel, =N jumps straight to option N and =X exits.\n"
             "TSO <command> and /<console command> work from every panel.")
@@ -441,7 +443,9 @@ class DslistScreen(Panel):
         if (d.get("dsorg") or "").startswith("PO"):
             self.app.push_screen(MemberScreen(d))
         elif d.get("dsorg") == "VS":
-            self.say("VSAM CLUSTERS ARE NOT BROWSABLE OVER Z/OSMF - USE COMMAND (OPTION 6)", "W")
+            cluster = d["dsname"].removesuffix(".DATA").removesuffix(".INDEX")
+            self.app.push_screen(BrowseScreen(cluster, lambda: "\n".join(zos.vsam_records(cluster, 500)),
+                                              note="VSAM KSDS, FIRST 500 RECORDS IN KEY ORDER"))
         else:
             self.app.push_screen(BrowseScreen(d["dsname"], lambda dsn=d["dsname"]: zos.view(dsn, 2000),
                                               note="FIRST 2000 RECORDS"))
@@ -1234,7 +1238,7 @@ class ReportsScreen(Panel):
         self.query_one("#list-box").border_title = "EARLY INTERVENTION LIST - EWS.RISKRPT (COBOL EWSRPT)"
         self.query_one("#recon", DataTable).add_columns("KEY", "VALUE")
         self.query_one("#rej", DataTable).add_columns("CODE", "SOURCE", "REASON", "COUNT")
-        self.query_one("#ilist", DataTable).add_columns("RANK", "CUSTOMER", "RISK %", "TIER", "ACTN", "TOTAL EMI", "TOP RISK FACTOR")
+        self.query_one("#ilist", DataTable).add_columns("RANK", "CUSTOMER", "RISK %", "TIER", "ACTN", "TOTAL EMI", "TOP RISK FACTOR", "NAME (FROM VSAM)")
         self.query_one("#ilist", DataTable).focus()
         self.action_refresh_panel()
 
@@ -1281,7 +1285,7 @@ class ReportsScreen(Panel):
         for r in rows:
             t.add_row(f"{r['rank']:>5}", Text(r["cust_id"], style=f"bold {TURQ}"), f"{r['risk_pct']:6.2f}",
                       Text(r["tier"], style=f"bold {tier_color[r['tier']]}"), r["action"],
-                      f"{r['total_emi']:>12,.2f}", r["top_factor"])
+                      f"{r['total_emi']:>12,.2f}", r["top_factor"], Text(r.get("name") or "-", style=WHITE))
         if not rows:
             self.say("NO INTERVENTION REPORT IN THIS RUN", "W")
 
@@ -1301,3 +1305,145 @@ class ReportsScreen(Panel):
         else:
             return False
         return True
+
+
+# ===================================================================== 8 VSAM
+class VsamScreen(Panel):
+    PANEL_ID = "EWSVSAM"
+    PANEL_TITLE = "VSAM KSDS CLUSTERS"
+    PFKEYS = "B=BROWSE CLUSTER  F3=END  F5=REFRESH   KEY custid  (or just type the ID, e.g. CUST0166)"
+    HELP = ("The project's two VSAM key-sequenced data sets (KSDS), key = customer ID:\n"
+            "  CUSTKSDS  customer master, rebuilt from CUST.VALID by EWSBATCH STEP055 (IDCAMS REPRO)\n"
+            "  SCORKSDS  latest score per customer, updated in place by COBOL EWSSUPD on every\n"
+            "            scoring run (READ by key, then REWRITE or WRITE); keeps the previous score\n\n"
+            "The table shows LISTCAT statistics: records, inserts, updates, CI/CA splits, CI size.\n"
+            "KEY CUST0166 reads both records by key (IDCAMS PRINT FROMKEY/TOKEY over z/OSMF).\n"
+            "B on a cluster browses its first 500 records in key order.")
+    BINDINGS = [Binding("b", "browse", show=False), Binding("s", "browse", show=False)]
+
+    def body(self) -> ComposeResult:
+        yield Static(id="vshead")
+        yield table("clusters")
+        with Horizontal(id="vsam-detail"):
+            yield Static(id="vcust", classes="box half")
+            yield Static(id="vscore", classes="box half")
+        yield Static(id="vraw", classes="box")
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        self.query_one("#clusters", DataTable).add_columns(
+            "CLUSTER", "RECORDS", "INSERTED", "UPDATED", "DELETED", "RETRIEVED", "CI-SPLIT", "CA-SPLIT",
+            "CISIZE", "KEYLEN", "VOLUME", "CREATED")
+        self.query_one("#vcust").border_title = "CUSTKSDS RECORD"
+        self.query_one("#vscore").border_title = "SCORKSDS RECORD"
+        self.query_one("#vraw").border_title = "RAW RECORDS (100 BYTES, KEY HIGHLIGHTED)"
+        self.query_one("#vcust", Static).update(Text("Type a customer ID on the command line, e.g. CUST0166", style=DIM))
+        self.query_one("#cmd", Input).focus()
+        self.action_refresh_panel()
+
+    def action_refresh_panel(self) -> None:
+        self.query_one("#vshead", Static).update(Text("LISTCAT ... (IDCAMS OVER Z/OSMF)", style=WHITE))
+        self.load()
+
+    @work(thread=True, exclusive=True, group="listcat")
+    def load(self) -> None:
+        try:
+            clusters = actions.vsam_clusters()
+        except Exception as e:
+            self.say_from_thread(f"EWS101E {e}", "E")
+            return
+        self.app.call_from_thread(self.fill, clusters)
+
+    def fill(self, clusters: list[dict]) -> None:
+        t = self.query_one("#clusters", DataTable)
+
+        def rows():
+            for c in clusters:
+                d = c.get("data", {})
+                if not c["exists"]:
+                    t.add_row(Text(c["dsname"], style=f"bold {YELLOW}"), Text("NOT DEFINED YET", style=YELLOW),
+                              *[""] * 10, key=c["dsname"])
+                    continue
+                t.add_row(Text(c["dsname"], style=f"bold {TURQ}"), f"{d.get('rec-total', 0):,}",
+                          f"{d.get('rec-inserted', 0):,}", f"{d.get('rec-updated', 0):,}",
+                          f"{d.get('rec-deleted', 0):,}", f"{d.get('rec-retrieved', 0):,}",
+                          str(d.get("splits-ci", 0)), str(d.get("splits-ca", 0)), str(d.get("cisize", "")),
+                          f"{d.get('keylen', '')} AT {d.get('rkp', 0)}", d.get("volser", ""),
+                          c.get("cluster", {}).get("created", ""), key=c["dsname"])
+        keep_cursor(t, rows)
+        self.query_one("#vshead", Static).update(Text(
+            "VSAM KSDS - KEY = CUSTOMER ID (8 BYTES AT OFFSET 0) - LISTCAT STATISTICS", style=WHITE))
+
+    def command(self, text: str) -> bool:
+        p = text.upper().split()
+        if p[0] in ("B", "BROWSE") and len(p) == 1:
+            self.action_browse()
+            return True
+        if p[0] in ("KEY", "K", "LOOKUP", "L") and len(p) == 2:
+            key = p[1]
+        elif len(p) == 1 and re.fullmatch(r"[A-Z]{4}\d{4}", p[0]):
+            key = p[0]
+        else:
+            return False
+        self.say(f"READING {key} BY KEY FROM BOTH CLUSTERS ...")
+        self.lookup(key)
+        return True
+
+    @work(thread=True, exclusive=True, group="lookup")
+    def lookup(self, key: str) -> None:
+        try:
+            r = actions.vsam_customer(key)
+        except Exception as e:
+            self.say_from_thread(f"EWS101E {e}", "E")
+            return
+        self.app.call_from_thread(self.show, r)
+
+    def show(self, r: dict) -> None:
+        def box(rows: list[tuple[str, str, str]]) -> Text:
+            t = Text()
+            for k, v, style in rows:
+                t.append(f"{k:<15}", style=TURQ)
+                t.append(f"{v}\n", style=style)
+            return t
+
+        c, s = r["customer"], r["score"]
+        if c:
+            self.query_one("#vcust", Static).update(box([
+                ("CUST-ID", c["cust_id"], f"bold {YELLOW}"), ("NAME", c["cust_name"], WHITE), ("CITY", c["city"], WHITE),
+                ("EMP-TYPE", c["emp_type"], WHITE), ("AGE", str(c["age"]), WHITE),
+                ("INCOME", f"{c['monthly_income']:,.2f}", WHITE), ("CREDIT-SCORE", str(c["credit_score"]), WHITE),
+                ("OPEN-DATE", str(c["open_date"]), WHITE), ("STATUS", c["status"], WHITE)]))
+        else:
+            self.query_one("#vcust", Static).update(Text(f"{r['cust_id']} NOT IN CUSTKSDS", style=YELLOW))
+        if s:
+            tier_color = {"HIGH": PINK, "MEDIUM": YELLOW, "LOW": GREEN}
+            rows = [("CUST-ID", s["cust_id"], f"bold {YELLOW}"), ("AS-OF", str(s["asof"]), WHITE),
+                    ("PROBABILITY", f"{s['prob'] * 100:.2f} %", f"bold {tier_color.get(s['tier'], WHITE)}"),
+                    ("TIER / ACTION", f"{s['tier']} {s['action']}", tier_color.get(s["tier"], WHITE)),
+                    ("TOP FACTOR", s["top_factor"], WHITE), ("TOTAL EMI", f"{s['total_emi']:,.2f}", WHITE)]
+            if s["prev_asof"]:
+                d = (s["prob"] - s["prev_prob"]) * 100
+                rows += [("PREVIOUS", f"{s['prev_prob'] * 100:.2f} % {s['prev_tier']} AS-OF {s['prev_asof']}", WHITE),
+                         ("CHANGE", f"{d:+.2f} POINTS", RED if d > 0 else GREEN)]
+            rows.append(("TIMES SCORED", str(s["times_scored"]), WHITE))
+            self.query_one("#vscore", Static).update(box(rows))
+        else:
+            self.query_one("#vscore", Static).update(Text(f"{r['cust_id']} NOT IN SCORKSDS (NEVER SCORED)", style=YELLOW))
+        raw = Text(no_wrap=True)
+        raw.append("         " + RULER[:100] + "\n", style=TURQ)
+        for name, rec in (("CUSTKSDS", r["raw"]["customer"]), ("SCORKSDS", r["raw"]["score"])):
+            raw.append(f"{name} ", style=WHITE)
+            if rec:
+                raw.append(rec[:8], style=f"bold reverse {YELLOW}")
+                raw.append(rec[8:100] + "\n", style=GREEN)
+            else:
+                raw.append("(no record)\n", style=DIM)
+        self.query_one("#vraw", Static).update(raw)
+        self.say(f"EWS100I {r['cust_id']} READ BY KEY FROM {r['source']['customer']} AND {r['source']['score']} "
+                 f"IN {r['ms']} MS")
+
+    def action_browse(self) -> None:
+        dsn = row_key(self.query_one("#clusters", DataTable))
+        if dsn:
+            self.app.push_screen(BrowseScreen(dsn, lambda: "\n".join(zos.vsam_records(dsn, 500)),
+                                              note="VSAM KSDS, FIRST 500 RECORDS IN KEY ORDER"))

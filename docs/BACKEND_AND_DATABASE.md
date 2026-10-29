@@ -29,8 +29,8 @@ Start with `make dev` or `make api`. It listens on **127.0.0.1:8000 only**, beca
 | `upload_sources` | — | upload DFSORT, REXX, JCL | < 1 min |
 | `generate_data` | `customers` 200–3000, `seed` | generate locally · delete+allocate the 4 input data sets · upload each | 40–60 s |
 | `train_model` | — | EWSBATCH TRAIN ×4 (each: submit, step RCs, download, check RUNCTL) · train | 2.5 min |
-| `run_batch` | `asof` YYYYMMDD (2025-03-31…2026-09-30) | EWSBATCH SCORE · load master data · score + SHAP · write SCORES · EWSRPTJ · download report | 70 s |
-| `reset_data` | `confirm: true` | delete all `EWS.*` data sets except the 4 source libraries | < 1 min |
+| `run_batch` | `asof` YYYYMMDD (2025-03-31…2026-09-30) | EWSBATCH SCORE · load master data · score + SHAP · write SCORES · EWSRPTJ (VSAM update + report) · LISTCAT check of both KSDS · download report | 80 s |
+| `reset_data` | `confirm: true` | delete all `EWS.*` data sets except the 4 source libraries (VSAM clusters with IDCAMS `DELETE … CLUSTER`) | < 1 min |
 
 Rules enforced by the API (`_validate` in `api/main.py`):
 * unknown action → 404; unexpected parameter names → 400; values outside their range → 400;
@@ -102,6 +102,7 @@ All paths are relative to `http://127.0.0.1:8000` (the dashboard calls them as `
 | `GET /datasets` | the `EWS.*` data sets with organisation, RECFM, LRECL, usage |
 | `GET /datasets/{dsn}/preview?records=` | first N records, or the member list for a PDS. **Only `HLQ.EWS.*` names are allowed** (403 otherwise). |
 | `GET /reports/{riskrpt\|rejects\|exceptions\|runctl}?runId=` | parsed reports of a run (default: last scoring run) |
+| `GET /vsam` | LISTCAT statistics of the two KSDS (records, inserted, updated, deleted, splits, CI size, volume) |
 | `GET /model` | `metrics.json` |
 
 ### Risk views
@@ -111,6 +112,7 @@ All paths are relative to `http://127.0.0.1:8000` (the dashboard calls them as `
 | `GET /customers` | every customer scored in the last run, sorted by probability, in the dashboard's `Customer` shape |
 | `GET /customers/{id}` | the same plus all loans and the 24-month account history |
 | `GET /customers/{id}/explanation?top=` | SHAP values (top N + "other"), baseline, reasoning, action, model version |
+| `GET /customers/{id}/vsam` | the customer read **live by key from the VSAM KSDS on z/OS**: CUSTKSDS record and SCORKSDS record (latest + previous score, times scored), with the time it took; 404 if in neither cluster |
 | `GET /customers/{id}/history` | the customer's predictions across runs |
 | `POST /customers/{id}/what-if` `{emiAmount}` | re-scored probability, tier, reasoning for a different EMI |
 | `GET /portfolio` | counts and EMI at risk per tier |

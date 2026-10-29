@@ -4,19 +4,19 @@ Sources live in `CP/mainframe/` and are uploaded by **Set up mainframe** to the 
 
 | Job | Member | Purpose | Submitted by |
 |---|---|---|---|
-| EWSCOMP | `EWS.JCL(EWSCOMP)` | compile and link the 4 COBOL programs | Set up / Recompile |
-| EWSBATCH | `EWS.JCL(EWSBATCH)` | sort, validate, match, build features, reconcile | Train model (×4, `MODE=TRAIN`), Run batch (`MODE=SCORE`) |
-| EWSRPTJ | `EWS.JCL(EWSRPTJ)` | sort the written-back scores and print the intervention list | Run batch (last step) |
+| EWSCOMP | `EWS.JCL(EWSCOMP)` | compile and link the 5 COBOL programs | Set up / Recompile |
+| EWSBATCH | `EWS.JCL(EWSBATCH)` | sort, validate, load the customer KSDS, match, build features, reconcile | Train model (×4, `MODE=TRAIN`), Run batch (`MODE=SCORE`) |
+| EWSRPTJ | `EWS.JCL(EWSRPTJ)` | update the score KSDS in place, sort the written-back scores, print the intervention list | Run batch (last step) |
 
 ## 1. EWSCOMP — compile and link
 
 ```jcl
 //CVCUST   EXEC IGYWCL,SRC=EWSVCUST
 //COBOL.SYSLIB DD DSN=&SYSUID..EWS.CPY,DISP=SHR
-   ... same for EWSVLOAN, EWSMATCH, EWSRPT
+   ... same for EWSVLOAN, EWSMATCH, EWSRPT, EWSSUPD
 ```
 
-`IGYWCL` is the site's catalogued procedure (`VENDOR.PROCLIB`) for Enterprise COBOL 6.5 (`IGY650.SIGYCOMP`): step `COBOL` runs the compiler on `&SYSUID..CBL(&SRC)`, step `LKED` runs the binder into `&SYSUID..LOAD(&SRC)` if the compile RC < 8. The added `COBOL.SYSLIB` DD lets `COPY CUSTREC.` etc. find the copybooks. All four programs compile with RC 0.
+`IGYWCL` is the site's catalogued procedure (`VENDOR.PROCLIB`) for Enterprise COBOL 6.5 (`IGY650.SIGYCOMP`): step `COBOL` runs the compiler on `&SYSUID..CBL(&SRC)`, step `LKED` runs the binder into `&SYSUID..LOAD(&SRC)` if the compile RC < 8. The added `COBOL.SYSLIB` DD lets `COPY CUSTREC.` etc. find the copybooks. All five programs compile with RC 0.
 
 ## 2. EWSBATCH — the main batch
 
@@ -31,6 +31,7 @@ Symbols (sent as `X-IBM-JCL-Symbol-*` headers on the z/OSMF submit): `ASOFDT` = 
 | STEP030 | DFSORT | `REPAYHST` → `REPAY.SRT`, bad → `REJECTS` | `CNTL(SRTREPAY)` | 0 |
 | STEP040 | DFSORT | `TXNSUMM` → `TXN.SRT`, bad → `REJECTS` | `CNTL(SRTTXN)` | 0 |
 | STEP050 | EWSVCUST | `CUST.SRT` → `CUST.VALID`, bad → `REJECTS`, totals → `CTLTOT` | | 0 or 4 |
+| STEP055 | IDCAMS | `CUST.VALID` → VSAM KSDS `CUSTKSDS` (`DELETE … PURGE`, `SET MAXCC = 0`, `DEFINE CLUSTER`, `REPRO`) | in-stream, `SYMBOLS=JCLONLY` | 0 |
 | STEP060 | EWSVLOAN | `LOAN.SRT` → `LOAN.VALID`, bad → `REJECTS`, totals → `CTLTOT` | | 0 or 4 |
 | STEP070 | EWSMATCH | `CUST.VALID` + `LOAN.VALID` + `REPAY.SRT` + `TXN.SRT` → `FEATURES`, `EXCEPT`, `CTLTOT` | `PARM='&ASOFDT.&MODE'` | 0 or 4 |
 | STEP080 | DFSORT | `FEATURES` → `FEATCSV` | `CNTL(FEAT2CSV)` | 0 |
@@ -74,6 +75,22 @@ The second `OUTFIL` reformats each bad record into the 120-byte REJREC layout, s
 `INREC` inserts a comma after each field; `SQZ` removes the blanks left by numeric editing (`   45.20` → `45.20`); `FTOV` + `VLTRIM` write variable-length records without trailing blanks; `HEADER1` adds the column names. The result is a standard CSV that pandas reads directly.
 
 **SRTSCORE** (EWSRPTJ) — `SORT FIELDS=(17,5,ZD,D,1,8,CH,A)`: highest probability first.
+
+### 2.1a STEP055 IDCAMS — the customer master as a VSAM KSDS
+
+```
+//SYSIN    DD *,SYMBOLS=JCLONLY
+  DELETE &SYSUID..EWS.CUSTKSDS CLUSTER PURGE
+  SET MAXCC = 0
+  DEFINE CLUSTER (NAME(&SYSUID..EWS.CUSTKSDS) -
+         INDEXED KEYS(8 0) RECORDSIZE(100 100) -
+         TRACKS(15 5) FREESPACE(10 10) SHAREOPTIONS(2 3)) -
+         DATA (NAME(&SYSUID..EWS.CUSTKSDS.DATA)) -
+         INDEX (NAME(&SYSUID..EWS.CUSTKSDS.INDEX))
+  REPRO INFILE(CUSTIN) OUTDATASET(&SYSUID..EWS.CUSTKSDS)
+```
+
+`SYMBOLS=JCLONLY` lets IDCAMS statements use `&SYSUID`, so the job still runs under any user ID. The delete finds nothing on the first run (RC 8), hence `SET MAXCC = 0`; a failing `DEFINE` or `REPRO` still ends the step with RC 12 and stops the batch. `CUST.VALID` is already in key order, so `REPRO` loads the cluster sequentially without CI splits.
 
 ### 2.2 COBOL program EWSVCUST — validate customers
 
@@ -148,6 +165,7 @@ Runs under TSO in batch (`IKJEFT1B`, which passes the exec's return code back as
 | CHK_REPAY | REPAYHST = REPAY.SRT + S01 rejects, and REPAY.SRT = records EWSMATCH read |
 | CHK_TXN | TXNSUMM = TXN.SRT + S02 rejects, and TXN.SRT = records EWSMATCH read |
 | CHK_MATCH | EWSMATCH read exactly the valid customers and valid loans |
+| CHK_VSAM | records in the KSDS `CUSTKSDS` = valid customers (EWSVCUST). `EXECIO` cannot read VSAM, so the count is `REC-TOTAL` from `LISTCAT ENTRIES(...) ALL`, trapped with `OUTTRAP` |
 | CHK_FEATURES | FEATURES records = written total = customers − closed − no loan − in default |
 
 5. writes all counts and checks as `KEY=VALUE` lines to `RUNCTL`, ending with `STATUS=OK` or `STATUS=OUT_OF_BALANCE` (RC 8).
@@ -163,13 +181,31 @@ CHK_CUST_SORT=OK ... CHK_FEATURES=OK  STATUS=OK
 ```
 (1475 − 16 − 371 − 65 = 1023.)
 
-## 3. EWSRPTJ — intervention report
+## 3. EWSRPTJ — VSAM score update and intervention report
 
 | Step | Program | Action |
 |---|---|---|
 | STEP005 | IEFBR14 | delete the previous `SCORES.SRT` and `RISKRPT` |
-| STEP010 | DFSORT `SRTSCORE` | `SCORES` → `SCORES.SRT`, highest probability first |
-| STEP020 | EWSRPT (only if STEP010 RC = 0) | prints `RISKRPT` (FBA 133): page headings with as-of date and page number, one line per customer (rank, ID, risk %, tier, action, total EMI, top risk factor), and totals per tier with the EMI amount at risk |
+| STEP006 | IDCAMS | `LISTCAT ENTRIES(&SYSUID..EWS.SCORKSDS)`; only `IF LASTCC NE 0 THEN DO … DEFINE CLUSTER … END`: the score KSDS keeps its records from run to run |
+| STEP008 | EWSSUPD (if RC = 0) | updates `SCORKSDS` in place from `SCORES`, see 3.1 |
+| STEP010 | DFSORT `SRTSCORE` (if RC = 0) | `SCORES` → `SCORES.SRT`, highest probability first |
+| STEP020 | EWSRPT (only if STEP010 RC = 0) | prints `RISKRPT` (FBA 133): page headings with as-of date and page number, one line per customer (rank, ID, risk %, tier, action, total EMI, top risk factor, **customer name read by key from `CUSTKSDS`**), and totals per tier with the EMI amount at risk |
+
+### 3.1 COBOL program EWSSUPD — keyed update of the score KSDS
+
+```cobol
+SELECT SCORE-KS ASSIGN TO SCOREKS ORGANIZATION IS INDEXED
+       ACCESS MODE IS DYNAMIC RECORD KEY IS SV-CUST-ID FILE STATUS IS WS-FS-KS.
+...
+MOVE SC-CUST-ID TO SV-CUST-ID
+READ SCORE-KS INVALID KEY CONTINUE END-READ
+EVALUATE WS-FS-KS
+  WHEN '00'  previous := current; current := new score; REWRITE   (UPDATED)
+  WHEN '23'  new record; WRITE                                    (ADDED)
+  WHEN OTHER VSAM error -> RC 16
+```
+
+A cluster that has never held a record cannot be opened `I-O` (file status 35); EWSSUPD then opens it `OUTPUT` and loads it (first run only). It `DISPLAY`s `READ`, `ADDED`, `UPDATED` and `TIER-CHANGED`, which the backend reads from the step's `SYSOUT` and shows on the run. EWSRPT opens `CUSTKSDS` with `ACCESS MODE IS RANDOM` and does one `READ` by key per report line (`NAMES FROM VSAM` / `NAMES MISSING`).
 
 ```
 EWS - EARLY WARNING CREDIT RISK SYSTEM        EARLY INTERVENTION LIST       AS-OF  2026-09-30          PAGE    1
@@ -190,7 +226,9 @@ EWS - EARLY WARNING CREDIT RISK SYSTEM        EARLY INTERVENTION LIST       AS-O
 | EWSVCUST / EWSVLOAN | all valid | some rejected | > 10% rejected (stops batch) | | file error |
 | EWSMATCH | ok | exceptions written | | bad PARM | file error |
 | EWSRECON | in balance | | out of balance | | |
-| EWSRPT | ok | no scores | | | file error |
+| EWSRPT | ok | no scores | | | file error (incl. CUSTKSDS open) |
+| EWSSUPD | ok | | | | VSAM or file error |
+| IDCAMS STEP055/STEP006 | ok | | (8 masked by `SET MAXCC`) | DEFINE / REPRO failed | |
 
 The backend treats RC ≤ 4 as success for EWSBATCH and EWSCOMP and RC 0 for EWSRPTJ.
 

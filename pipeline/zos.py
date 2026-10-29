@@ -95,6 +95,11 @@ def request(method: str, path: str, *, params: dict | None = None, headers: dict
         ms = int((time.monotonic() - t0) * 1000)
         if r.status_code >= 400:
             msg = _error_text(r)
+            # z/OSMF sometimes times out talking to its own back end (HTTP 500 "__msgrcv_timed ... timed out")
+            if r.status_code >= 500 and "timed out" in msg and attempt < retries:
+                oplog.write("EWS102W", f"{method} {path} HTTP {r.status_code} SERVER TIMEOUT - RETRY {attempt}", ms)
+                time.sleep(3 * attempt)
+                continue
             oplog.write("EWS101E", f"{method} {path} HTTP {r.status_code} {msg}", ms)
             if r.status_code == 401:
                 raise ZosError("z/OSMF rejected the user ID or password (HTTP 401). Log on again: make login")
@@ -230,6 +235,102 @@ def view(dsn: str, max_records: int | None = None) -> str:
     if max_records:
         headers["X-IBM-Record-Range"] = f"0,{max_records}"
     return _text(request("GET", _ds(dsn), headers=headers, timeout=120))
+
+
+# ---------------------------------------------------------------- VSAM (IDCAMS)
+def idcams(*commands: str, check: bool = True) -> dict:
+    """Run IDCAMS commands through z/OSMF (PUT /zosmf/restfiles/ams): {"rc", "output": [lines]}."""
+    r = request("PUT", "/zosmf/restfiles/ams", json_body={"input": list(commands), "JSONversion": 1},
+                retries=1, timeout=120).json()
+    if check and r.get("rc", 0) > 4:
+        msgs = [l.strip() for l in r.get("output", []) if re.search(r"IDC\d{4}[IE]", l) and "IDC0001I" not in l]
+        raise ZosError(f"IDCAMS RC {r.get('rc')}: {' '.join(msgs)[:500] or commands[0]}")
+    return r
+
+
+_LISTCAT_FIELDS = ("REC-TOTAL", "REC-INSERTED", "REC-UPDATED", "REC-DELETED", "REC-RETRIEVED", "SPLITS-CI",
+                   "SPLITS-CA", "FREESPACE-%CI", "FREESPACE-%CA", "CISIZE", "KEYLEN", "RKP", "MAXLRECL",
+                   "HI-U-RBA", "HI-A-RBA", "EXTENTS", "VOLSER", "STORAGECLASS", "DATACLASS")
+
+
+def parse_listcat(lines: list[str]) -> dict:
+    """LISTCAT ALL of one cluster -> {"cluster": {...}, "data": {...}, "index": {...}}."""
+    out: dict = {}
+    part = None
+    for line in lines:
+        m = re.match(r"\s*(CLUSTER|DATA|INDEX)\s+-{3,}\s+(\S+)", line)
+        if m:
+            part = m.group(1).lower()
+            out[part] = {"name": m.group(2)}
+            continue
+        if part is None:
+            continue
+        # FIELD-NAME------value: name parts are joined by single dashes, the padding is 2+ dashes
+        for k, v in re.findall(r"\b([A-Z][A-Z%/]*(?:-[A-Z%/]+)*)-{2,}(\S+)", line):
+            if k in _LISTCAT_FIELDS and k.lower() not in out[part]:
+                out[part][k.lower()] = int(v) if v.isdigit() else v
+        m = re.search(r"CREATION-{2,}(\S+)", line)
+        if m:
+            out[part].setdefault("created", m.group(1))
+    return out
+
+
+def listcat(dsn: str) -> dict:
+    return parse_listcat(idcams(f"LISTCAT ENTRIES({dsn.upper()}) ALL")["output"])
+
+
+def parse_print_hex(lines: list[str]) -> list[bytes]:
+    """Records from IDCAMS PRINT ... HEX: 'KEY OF RECORD - <hex>' then the record in hex."""
+    recs: list[bytes] = []
+    cur: list[str] | None = None
+    for line in lines:
+        s = line.strip()
+        if s.startswith("KEY OF RECORD"):
+            if cur is not None:
+                recs.append(bytes.fromhex("".join(cur)))
+            cur = []
+        elif cur is not None and re.fullmatch(r"[0-9A-F]+", s):
+            cur.append(s)
+        elif cur is not None and s:
+            recs.append(bytes.fromhex("".join(cur)))
+            cur = None
+    if cur:
+        recs.append(bytes.fromhex("".join(cur)))
+    return recs
+
+
+def ebcdic(b: bytes) -> str:
+    """IBM-1047 to text. CPython has no cp1047; cp037 differs only in a few symbols, not letters or digits."""
+    try:
+        return b.decode("cp1047")
+    except LookupError:
+        return b.decode("cp037")
+
+
+def vsam_read(dsn: str, key: str, to_key: str | None = None) -> list[str]:
+    """Records of a KSDS by key (or key range) through IDCAMS PRINT, decoded from EBCDIC."""
+    for k in (key, to_key or key):
+        if not re.fullmatch(r"[A-Z0-9#@$]{1,44}", k.upper()):
+            raise ZosError(f"Invalid key {k}")
+    try:
+        r = idcams(f"PRINT INDATASET({dsn.upper()}) FROMKEY({key.upper()}) TOKEY({(to_key or key).upper()}) HEX",
+                   check=False)
+    except ZosError as e:
+        # z/OSMF answers HTTP 500 when PRINT finds no record in the key range (IDCAMS RC 12)
+        if "NUMBER OF RECORDS PROCESSED WAS 0" in str(e):
+            return []
+        raise
+    return [ebcdic(b) for b in parse_print_hex(r.get("output", []))]
+
+
+def vsam_records(dsn: str, count: int = 200) -> list[str]:
+    """The first `count` records of a VSAM cluster in key order (IDCAMS PRINT COUNT)."""
+    r = idcams(f"PRINT INDATASET({dsn.upper()}) COUNT({int(count)}) HEX", check=False)
+    return [ebcdic(b) for b in parse_print_hex(r.get("output", []))]
+
+
+def delete_vsam(dsn: str) -> None:
+    idcams(f"DELETE {dsn.upper()} CLUSTER")
 
 
 # ---------------------------------------------------------------- jobs

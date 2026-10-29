@@ -43,7 +43,7 @@ Every button goes through `ActionButton`, which posts the action and navigates t
 |---|---|
 | `/` | selected customer: risk gauge, **what-if EMI re-scoring**, "why this score", balance/tier/EMI cards, 6-month spend vs EMI chart, prediction history |
 | `/customers` | all scored customers: search, tier filter, sorting, paging (50 per page), portfolio summary cards |
-| `/customer/[id]` | profile (from CUSTMAST), every loan (LOANMAST), credit ring, risk, balance vs EMI, suggestions, **24-month account history chart** (TXNSUMM), printable report |
+| `/customer/[id]` | profile (from CUSTMAST), every loan (LOANMAST), credit ring, risk, balance vs EMI, suggestions, **24-month account history chart** (TXNSUMM), **Live from VSAM** card (reads the customer by key from the KSDS on z/OS on request: latest and previous score, change, times scored), printable report |
 | `/prediction?customerId=` | SHAP waterfall (red = raises risk, green = lowers), feature table, model metadata incl. validation AUC, reasoning card, change vs previous run, history; print to PDF |
 | `/comparison` | up to 6 customers (default: 3 riskiest, the selected one, 2 safest): spend trajectories, spend/EMI table, risk ranking |
 | `/emi-forecast` | Medium/High customers with their next EMI dates, stress probability and balance vs EMI |
